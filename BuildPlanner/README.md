@@ -60,11 +60,13 @@ BuildPlanner ready.
 |---|---|---|
 | **Right-click** an unfinished block (welder equipped) | Queue the components it still needs | yes |
 | **N** | Withdraw queued components, clear the queue | yes |
-| **CTRL + N** | Withdraw, **keep** the queue (repeat building) | not yet |
-| **ALT + CTRL + N** | Withdraw **×10**, keep the queue | not yet |
-| **ALT + N** | Deposit ore, materials and components into the target (keeps tools) | partly |
-| **SHIFT + N** | Clear the queue without withdrawing | not yet |
+| **CTRL + N** | Withdraw, **keep** the queue (repeat building) | yes |
+| **ALT + CTRL + N** | Withdraw **×10**, keep the queue | yes |
+| **ALT + N** | Deposit ore, materials and components into the target (keeps tools) | yes |
+| **SHIFT + N** | Clear the queue without withdrawing | yes |
 | **SHIFT + CTRL + N** | Dump runtime state to the log (developer tool) | yes |
+
+Build planner input is ignored while the game is paused.
 
 Right-click is only *bound* while a welder or area welder is showing its block panel. The rest of the
 time the mod does not hold the button at all, so the game keeps it for dropping items in the

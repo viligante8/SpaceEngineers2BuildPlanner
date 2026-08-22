@@ -30,8 +30,6 @@ namespace BuildPlanner;
 ///     tool._playerData          field/property navigation, any depth
 ///     planner                   the local player's BuildPlannerData
 ///     planner.PlannedBlocks[0]  index into any list or array
-///     terminal                  the last TerminalScreenViewModel seen
-///     terminal.BuildPlannerBlocks[2].Definition
 ///     tool._model !2            trailing !N expands N levels deep (default 1)
 /// Lines starting with # are comments.
 ///
@@ -40,9 +38,6 @@ namespace BuildPlanner;
 /// </summary>
 internal static class Diagnostics
 {
-    /// <summary>The last terminal screen the game built, captured by a detour. May be null.</summary>
-    internal static object? LastTerminal;
-
     /// <summary>Everything worth knowing, plus whatever queries.txt asks for.</summary>
     internal static void DumpAll(BuildPlannerQueue queue, Session? clientSession, Session? serverSession)
     {
@@ -55,7 +50,6 @@ internal static class Diagnostics
             DumpTool();
             DumpPlannerChain(clientSession);
             DumpServerPlanner(clientSession, serverSession);
-            DumpTerminal();
             RunFileQueries(clientSession);
         }
         catch (Exception ex)
@@ -170,29 +164,6 @@ internal static class Diagnostics
         }
     }
 
-    private static void DumpTerminal()
-    {
-        if (LastTerminal == null)
-        {
-            Log.Write("  terminal: never opened this session (open a block's control panel, then dump again)");
-            return;
-        }
-
-        Log.Write($"  terminal: {LastTerminal.GetType().Name} #{Id(LastTerminal)}");
-
-        var data = GetMember(LastTerminal, "_buildPlannerData");
-        Log.Write($"  terminal._buildPlannerData = {Describe(data)}   <- compare this id with the planner chain above");
-
-        var blocks = GetMember(LastTerminal, "BuildPlannerBlocks");
-        Log.Write($"  terminal.BuildPlannerBlocks = {Describe(blocks)}");
-
-        if (blocks is IEnumerable list)
-        {
-            var n = 0;
-            foreach (var item in list) Log.Write($"    [{n++}] {item}");
-            if (n == 0) Log.Write("    (empty)");
-        }
-    }
 
     /// <summary>
     /// Run whatever queries.txt asks for. Re-read every dump, so new questions cost no rebuild.
@@ -294,7 +265,6 @@ internal static class Diagnostics
         switch (name.ToLowerInvariant())
         {
             case "tool": return IntegrityToolAccess.Captured;
-            case "terminal": return LastTerminal;
             case "clientsession": return clientSession;
             case "planner":
             {
@@ -304,7 +274,7 @@ internal static class Diagnostics
                 if (perPlayer == null || players == null) return null;
                 return perPlayer.GetPerPlayerData<BuildPlannerData>(players.LocalPlayerIdentity);
             }
-            default: throw new ArgumentException($"unknown root '{name}' (try tool, terminal, planner, clientsession)");
+            default: throw new ArgumentException($"unknown root '{name}' (try tool, planner, clientsession)");
         }
     }
 

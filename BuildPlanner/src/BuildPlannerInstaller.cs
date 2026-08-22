@@ -48,7 +48,6 @@ internal sealed class BuildPlannerInstaller
     private static Hook? _setMappingHook;
     private static Hook? _integrityToolHook;
     private static Hook? _integrityToolCloseHook;
-    private static Hook? _terminalHook;
 
     internal void Install(PluginHost host)
     {
@@ -125,62 +124,6 @@ internal sealed class BuildPlannerInstaller
 
         _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
         Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
-
-        InstallTerminalHook();
-    }
-
-    /// <summary>
-    /// Capture the terminal screen view model when the game builds one.
-    ///
-    /// TerminalScreenViewModel is the only thing in the shipping game bound to BuildPlannerData, so
-    /// whether it holds the SAME instance the mirror writes to is the open question behind "the queue
-    /// does not show up anywhere". Capturing it lets the diagnostic dump compare the two references
-    /// directly instead of inferring.
-    /// </summary>
-    private void InstallTerminalHook()
-    {
-        var type = typeof(Keen.Game2.Client.UI.TerminalScreen.TerminalScreenViewModel);
-
-        // BuildScreenTree runs when the terminal is opened and its screens are assembled.
-        var build = type.GetMethod(
-            "BuildScreenTree", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-        if (build == null)
-        {
-            Log.Write("  WARNING: TerminalScreenViewModel.BuildScreenTree not found; terminal not captured");
-            return;
-        }
-
-        try
-        {
-            _terminalHook = new Hook(build, HookedBuildScreenTree);
-            Log.Write("  hook installed on TerminalScreenViewModel.BuildScreenTree");
-        }
-        catch (Exception ex)
-        {
-            // Non-fatal: only diagnostics are lost.
-            Log.Error("hooking TerminalScreenViewModel.BuildScreenTree failed", ex);
-        }
-    }
-
-    private delegate void OriginalBuildScreenTree(
-        object self, object session, object a, object b, object c, bool d, object args);
-
-    private static void HookedBuildScreenTree(
-        OriginalBuildScreenTree original,
-        object self, object session, object a, object b, object c, bool d, object args)
-    {
-        original(self, session, a, b, c, d, args);
-
-        try
-        {
-            Diagnostics.LastTerminal = self;
-            Log.Write("  terminal screen built and captured (SHIFT+N to dump what it holds)");
-        }
-        catch (Exception ex)
-        {
-            Log.Error("capturing the terminal screen failed", ex);
-        }
     }
 
     private delegate void OriginalCloseHUD(

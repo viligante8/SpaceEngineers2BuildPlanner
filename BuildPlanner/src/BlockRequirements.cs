@@ -55,13 +55,10 @@ internal static class BlockRequirements
 
             var remaining = Subtract(total, stored);
 
-            // Full accounting, always logged while this is under investigation.
-            //
-            // GetItemPresenceForCurrentBuildProgress is linear - ceil(progress * TotalItemAmount) -
-            // so a block at 70% should still owe roughly 30% of its components. In game it reported
-            // zero outstanding at 70%, which contradicts that. Reading the code did not explain it,
-            // so log every input to the subtraction and let one run settle it.
-            Log.Write($"  remainder for '{definition.UIData?.Name}':" +
+            // Kept at debug level. This accounting is what exposed the duplicate-item bug, and the
+            // numbers are cheap to produce; the outcome line the player needs is "requires N x item",
+            // logged separately by the queue.
+            Log.Debug($"  remainder for '{definition.UIData?.Name}':" +
                       $" effectiveProgress={block.EffectiveBuildProgress:F3}" +
                       $" buildProgress={block.BuildProgress:F3}" +
                       $" totalItemAmount={(int)definition.TotalItemAmount}" +
@@ -148,12 +145,12 @@ internal static class BlockRequirements
         return remaining;
     }
 
-    /// <summary>Log an item list compactly. Temporary, for the remainder investigation.</summary>
+    /// <summary>Log an item list compactly, at debug level.</summary>
     private static void LogItems(string label, List<ItemAmount> items)
     {
         if (items.Count == 0)
         {
-            Log.Write($"  {label}: (none)");
+            Log.Debug($"  {label}: (none)");
             return;
         }
 
@@ -164,7 +161,7 @@ internal static class BlockRequirements
             sb.Append((int)item.Amount).Append(" x ").Append(item.Item?.DisplayName.ToString() ?? "?");
         }
 
-        Log.Write($"  {label}: {sb}");
+        Log.Debug($"  {label}: {sb}");
     }
 
     /// <summary>The block's complete recipe, for projections and for error fallback.</summary>
