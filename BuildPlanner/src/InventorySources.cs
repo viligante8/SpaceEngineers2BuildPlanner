@@ -39,13 +39,20 @@ internal static class InventorySources
             // inventory lookup fail. Try the common tags, then fall back to untagged.
             Log.Debug($"  debug: aimed entity '{target.DebugName}' components={target.Components.Length}");
 
-            var direct = FindInventory(target);
-            if (direct != null)
+            // ALL of the aimed block's inventories, not just the first.
+            //
+            // A converter has more than one - an assembler keeps what it consumes and what it
+            // produces apart - and the components a player wants are in the output. Taking only the
+            // first would have quietly searched the wrong half of the block.
+            var own = CollectInventories(target);
+
+            foreach (var inventory in own)
             {
-                sources.Add(direct);
-                PlayerAccess.LogInventoryContents(target.DebugName, direct);
+                sources.Add(inventory);
+                PlayerAccess.LogInventoryContents(target.DebugName, inventory);
             }
-            else Log.Debug("  debug: aimed entity has no InventoryComponent");
+
+            var direct = own.Count > 0 ? own[0] : null;
 
             // Then everything that can reach it across the conveyor network.
             if (direct == null)
@@ -192,18 +199,106 @@ internal static class InventorySources
     }
 
     /// <summary>
-    /// An entity's inventory, tolerating the tag slot it happens to use.
+    /// An entity's inventory, whatever tag slot it happens to use.
     /// </summary>
     private static InventoryComponent? FindInventory(Entity entity)
     {
-        foreach (var tag in InventoryTags)
-        {
-            var inventory = entity.TryGet<InventoryComponent>(StringId.Get(tag));
-            if (inventory != null) return inventory;
-        }
-
-        return entity.TryGet<InventoryComponent>();
+        var found = CollectInventories(entity);
+        return found.Count > 0 ? found[0] : null;
     }
 
-    private static readonly string[] InventoryTags = { "Inventory", "InventoryOut", "InventoryIn" };
+    /// <summary>
+    /// Every inventory on an entity, preferred ones first.
+    ///
+    /// **Tag guessing is not enough, and cannot be.** <c>Entity.TryGet&lt;T&gt;(tag)</c> resolves by
+    /// tag and only then casts:
+    ///
+    /// <code>
+    /// if (CompositionData.TryGetValue(tag, out var index)) return Components[index];
+    /// return null;
+    /// </code>
+    ///
+    /// so it finds a component only when the tag was guessed exactly right. Aiming at an assembler
+    /// reported "that block has no inventory to pull through" for precisely that reason: it has
+    /// inventories, but under tags this list did not contain. Guessing more tag names would only
+    /// move the failure to the next block type.
+    ///
+    /// <c>Entity.All&lt;T&gt;()</c> scans the component array by type and ignores tags entirely, so
+    /// it finds them regardless of naming. The tag pass is kept first only for ORDER: a deposit
+    /// wants a block's main or input inventory as its destination, not whichever happens to sit
+    /// first in the array.
+    /// </summary>
+    private static List<InventoryComponent> CollectInventories(Entity entity)
+    {
+        var found = new List<InventoryComponent>();
+
+        try
+        {
+            foreach (var tag in InventoryTags)
+            {
+                var tagged = entity.TryGet<InventoryComponent>(StringId.Get(tag));
+                if (tagged != null && !found.Contains(tagged)) found.Add(tagged);
+            }
+
+            var byTag = found.Count;
+
+            // Entity.Components directly rather than Entity.All<T>(): All returns a NoAlloq
+            // SpanEnumerable, and referencing that assembly to walk an array we already have would
+            // add a dependency for nothing.
+            foreach (var component in entity.Components)
+            {
+                if (component is InventoryComponent inventory && !found.Contains(inventory))
+                    found.Add(inventory);
+            }
+
+            // Worth knowing, because ordering is then unverified: with no recognised tag we cannot
+            // tell a converter's input inventory from its output, so a deposit lands in whichever
+            // comes first in the component array. Withdrawal is unaffected - it reads all of them.
+            if (byTag == 0 && found.Count > 0)
+            {
+                Log.Debug($"  debug: '{entity.DebugName}' has {found.Count} inventory/inventories under"
+                          + " tags we do not recognise; found them by type instead");
+            }
+
+            if (found.Count == 0) LogComponents(entity);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"collecting inventories on '{entity.DebugName}' failed", ex);
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Dump an entity's component types when no inventory was found.
+    ///
+    /// Verifying the object beats theorising about the lookup (CLAUDE.md): the assembler case looked
+    /// like a tag problem and was one, but only the component list could have shown that - and a
+    /// filtered or truncated list has hidden the answer here before, so this prints all of them.
+    /// </summary>
+    private static void LogComponents(Entity entity)
+    {
+        try
+        {
+            var names = new List<string>();
+            foreach (var component in entity.Components)
+                names.Add(component?.GetType().Name ?? "null");
+
+            Log.Debug($"  debug: '{entity.DebugName}' has no InventoryComponent; its {names.Count} component(s):");
+            for (var i = 0; i < names.Count; i += 6)
+                Log.Debug("      " + string.Join(", ", names.GetRange(i, Math.Min(6, names.Count - i))));
+        }
+        catch (Exception ex)
+        {
+            Log.Error("dumping the entity's components failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Preferred inventory tags, in the order a destination should be chosen. Discovery does not
+    /// depend on this list - <see cref="CollectInventories"/> falls back to a type scan - so an
+    /// unknown tag costs ordering, never the inventory itself.
+    /// </summary>
+    private static readonly string[] InventoryTags = { "Inventory", "InventoryIn", "InventoryOut" };
 }

@@ -923,3 +923,41 @@ only worth keeping as a fallback for when the model is momentarily absent.
 previous screen before opening the next. Anything hooking it to mean "the tool stopped showing a
 block" will therefore fire constantly during normal aiming, and must be paired with a re-capture on
 the update path to be self-correcting.
+
+
+## Finding a block's inventory: scan by type, never by tag (2026-08-22)
+
+Aiming at an assembler and pressing withdraw reported "not looking at a container", although the
+target had resolved perfectly:
+
+```
+debug: aimed entity 'Assembler500_ServerComposition' components=12
+debug: aimed entity has no InventoryComponent
+```
+
+`Entity.TryGet<T>(StringId tag)` resolves **by tag first and casts second**:
+
+```csharp
+public Component? TryGet(StringId tag) {
+    if (CompositionData.TryGetValue(tag, out var index)) return Components[index];
+    return null;
+}
+```
+
+so it returns a component only when the tag was guessed exactly right. Our list
+(`Inventory`, `InventoryIn`, `InventoryOut`) covers cargo containers but not converters, and
+extending it would only move the failure to the next block type. `CompositionData` is a
+`Dictionary<int,int>` of StringId hash to component index — tags are the *only* key it has.
+
+**Scan `Entity.Components` by type instead.** It is a public `ImmutableArray<Component>`, so a plain
+`is InventoryComponent` walk finds every inventory whatever its tag. (`Entity.All<TFeature>()` does
+the same thing but returns a NoAlloq `SpanEnumerable`, which means referencing that assembly for no
+gain. `Entity.Has<T>` asserts it is "reserved for interfaces or with conditional".)
+
+Converters keep **more than one** inventory — vanilla ships
+`Assembler500_Client_InventoryInDefinition` and `Assembler500_Client_InventoryOutDefinitionOut` — and
+what a player wants to withdraw is in the *output*, so collect them all rather than the first.
+
+The tag pass is still worth keeping ahead of the type scan, but only for ORDER: a deposit wants a
+block's main or input inventory as its destination. When no tag is recognised that ordering is a
+guess, and the code says so in the log rather than pretending otherwise.
