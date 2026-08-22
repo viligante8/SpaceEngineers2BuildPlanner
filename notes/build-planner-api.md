@@ -1031,3 +1031,30 @@ The icon cast vanilla performs is worth copying verbatim: `ItemDefinition.Icon` 
 **`Amount` has no `NotificationType`.** `CreateMaterialNotification` reads as a gain, so a shortfall
 ("still short 611x Steel Plate") cannot use it and stays as text — which is fine, since those lines
 are short.
+
+
+### The gain row cannot be recoloured (2026-08-22)
+
+An obvious next thought — show a shortfall in the same icon+number row but red — does not work, and the
+reason is in the compiled XAML of `HUDNotificationView`:
+
+```csharp
+textBlock5.Text = "+";                                   // literal, always present
+… new StaticResourceExtension("Success")                 // foreground of both "+" and the amount
+```
+
+The row is hardcoded as a gain. Neither knob helps:
+
+- **A negative amount** renders as `+ -100`, because the `+` is a literal with no visibility binding.
+- **`NotificationType.Error`** does nothing: `MaterialNotificationViewModel` never copies
+  `notification.Type` into the view model, unlike `TextNotificationViewModel` which does
+  `base.Type = notification.Type`. Only text rows respond to the Info/Error styling.
+
+So gains use `CreateMaterialNotification`, and anything that is *not* a gain uses
+`CreateTextNotification` **with the item's icon** — vanilla's own "inventory full" passes one, so a
+text row still gets a picture, the red Error styling, and a short per-item string
+("short 100x Heavy-Duty Plate"). One row per item either way, which is the shape the notification
+collection is designed around.
+
+Recolouring the numeral itself would mean patching the compiled template or walking the live visual
+tree. Not attempted; noted here so the next session knows the cost before trying.
