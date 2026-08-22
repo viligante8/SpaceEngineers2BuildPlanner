@@ -168,7 +168,7 @@ Observed: one queued Light Armor Cube resolved to `1 x Steel Plate`, shortfall c
 plate moved from a `CargoContainer750` into the player's inventory across a 25-inventory conveyor
 sweep.
 
-## Reaching the HUD from a plugin (metadata-verified 2026-08-22, not yet observed in game)
+## Reaching the HUD from a plugin (verified in game 2026-08-22)
 
 `InGameUI` is the HUD entry point, and `ShowNotification` is documented in the shipped XML:
 
@@ -208,8 +208,7 @@ Resolve it per call, never cache: it is null at the main menu and is replaced on
 `HudNotification` is a **struct** whose `Content` is `Nullable<LocKey>`, so `notification.Content`
 needs a null check before `ToString`.
 
-Not yet confirmed in game — the call compiles against the real assemblies but has not been observed
-putting text on screen. Until it is, treat this as verified-by-metadata only.
+Confirmed in game: notifications appear on screen, including the production and reach messages.
 
 ## The block placer is NOT on the character (root cause, 2026-08-22)
 
@@ -344,3 +343,179 @@ boilerplate.
 `PropertyChanged` handler and `List.Add` raises no event), and what the second parameter of
 `AddPlannedBlock(CubeBlockDefinition, int)` means — count or index. The mirror writes to the
 `PlannedBlocks` list directly for that reason.
+
+## Production: the engine already cascades sub-components (2026-08-22)
+
+**The single most important fact for SHIFT-produce, and it removes most of the work.** A mod does
+not need to walk the recipe tree (plate → ingot → ore) and enqueue each tier on the right block.
+`ItemConverterComponent` does that itself, and reimplementing it would duplicate engine behaviour
+that already handles load-spreading and cancellation.
+
+### The API
+
+```csharp
+// Keen.Game2.Simulation.WorldObjects.CubeBlocks.Production.ItemConverters.ItemConverterComponent
+public bool TryEnqueueRecipe(ItemRecipeDefinition recipe, int repeatTimes)   // public
+public readonly ItemConverterDefinition Definition;
+public readonly InventoryComponent InputInventory;
+public readonly InventoryComponent OutputInventory;
+public bool Crafting { get; }
+public bool DequeueRecipe(int index)
+public bool DequeueCurrentRecipe()
+```
+
+`TryEnqueueRecipe` returns false only when the queue is at `Definition.MaxQueueSize` and the recipe
+cannot be merged into the last entry (identical recipe + identical requester merge by bumping
+`Times`). Assembler500 ships `MaxQueueSize: 20`.
+
+This is the same call the terminal makes.
+`StreamedProductionInfoSessionComponent.TryEnqueueAsync(model, recipe, times)` does `MoveTo.Server`,
+validates the recipe is in the converter's own `Definition.RecipeDefinitions`, then calls
+`TryEnqueueRecipe`. Running on the server session in-process, a plugin can call it directly.
+
+### The cascade, and what triggers it
+
+`TryEnqueueRecipe` takes `GetWritePtr<ConversionQueueData>()`. That marks the data changed, which
+fires the DCS job:
+
+```csharp
+[OnAdded(typeof(ConversionQueueData))]
+[OnChanged(typeof(ConversionQueueData))]
+[OnChanged(typeof(ConversionQueueItem))]
+private void OnRecipeCompletedOrEnqueued(...)
+{
+    TryStartNextRecipe(...);
+    MarkChildRequestsDirty();      // <- sets RefreshChildRequestsTag
+}
+```
+
+`RefreshChildRequestsTag` schedules `UpdateRequestsWhileEnabled`, which in order:
+
+1. `AccumulateIngredientsForFullQueue` — totals the inputs the whole queue needs
+2. `PreventItemsFromBeingPulled` / `RemoveItemsAlreadyInInventory` — subtracts what it holds
+3. `LimitItemsToRequestByAvailableInventorySpace`
+4. `UpdatePersistentRequests` — raises conveyor pull requests, so the block feeds itself
+5. `EnsureConnectedConverterCacheIsUpdated` + `UpdateChildRequests` — **delegation**
+
+`UpdateChildRequests` finds converters that can produce each still-missing input and calls the
+*private* overload `TryEnqueueRecipe(recipe, count, requester)` with itself as `requester`. The
+child's queue change marks the child dirty in turn, so the cascade recurses to ore without the
+caller knowing any intermediate recipe exists.
+
+Also handled for free:
+- **Load spreading** — `UpdateRequestsInAvailableConverters` divides the demand by the number of
+  capable converters and rounds up per converter with `(int)FixedPoint.Ceiling(amount / perRun)`.
+- **Retraction** — `ClearChildRequestsOfPreviousChildren` + `RemoveQueuedItemsFromRequester` pull
+  the child requests back when the parent's queue changes.
+- **Merging** — a repeat request bumps `Times` via `UpdateAlreadyProducingChildRecipeWithCount`
+  rather than queueing a duplicate.
+
+**Scope is the conveyor group, not the grid.** `EnsureConnectedConverterCacheIsUpdated` iterates
+`_conveyorComponent.ConveyorSystem.TryGetGroup(Entity.DEntity).Blocks`. The mod's own converter
+search is grid-wide (it reuses the withdrawal's `InventorySystemComponent.Inventories` sweep), so
+the two differ — recorded as a known gap in `BuildPlanner/README.md`.
+
+### Item → recipe
+
+`ItemConverterComponent.CanProduceItem(ItemDefinition)` does exactly this and is **private**. The
+same walk over public collections is what `TryEnqueueAsync` uses, so reimplementing it is using the
+intended surface, not working around one:
+
+```
+Definition.RecipeDefinitions            // ListDictionaryReader<ItemConverterRecipeCategoryDefinition, ItemRecipesDefinition>
+  -> category.Value                     // ListReader<ItemRecipesDefinition>
+    -> recipes.Recipes                  // ImmutableArray<ItemRecipeDefinition>
+      -> recipe.Outputs                 // ImmutableArray<ItemAmount>, match Item and Amount > 0
+```
+
+**Both readers are value types.** `RecipeDefinitions` is a `ListDictionaryReader<,>` and its values
+are `ListReader<>`; neither can be compared to null. The decompiled iteration reads as
+`KeyValuePair<category, ListReader<...>>`, which looks reference-like and is not — the compiler
+caught this, nothing else would have.
+
+`ItemRecipeDefinition` exposes `Inputs`, `Outputs`, `TimeToConvert`, `Icon`, `DisplayNameOverride`.
+In the `.def` JSON, `Inputs`/`Outputs`/`Recipes` all serialize as Key/Value pairs but are flat
+`ImmutableArray`s at runtime.
+
+### The personal crafter is a separate system
+
+`Keen.Game2.Simulation.WorldObjects.Tools.BackpackItemConverterComponent` (`[ServerOnly]`,
+`[DefaultTag("IBackpackItemConverter")]`) is the welder's ad-hoc crafting, not the assembler:
+
+```csharp
+ItemRecipeDefinition? TryGetRecipe(ReadOnlySpan<ItemAmount> itemsNeededNow, ReadOnlySpan<ItemAmount> allMissingItems)
+Task<bool> CraftRecipe(ItemRecipeDefinition recipe)     // one at a time; no-op while IsCrafting
+void StopItemConversion()
+```
+
+`TryGetRecipe` is tantalisingly close to what Build Planner wants ("the next recipe that should run
+based on the components that are needed") but crafts a **single** recipe into the player's own
+inventory, has no queue, and signals `ShowCraftablesMissingIngredients` / `ShowUncraftable` on
+failure. `RecipeHelper.TryCraft(recipe, inventory, efficiencyMultiplier, craftsCount)` is the
+underlying primitive and is public. Not used by SHIFT-produce, which targets assemblers — but it is
+the right entry point if an "instant craft from ore in your backpack" variant is ever wanted.
+
+## `InventorySystemComponent.Inventories` is grid-wide, NOT the conveyor network (2026-08-22)
+
+**A name that means the opposite of what it looks like, and it produced a real bug.**
+
+```csharp
+// InventorySystemComponent
+private HashSet<InventoryComponent> _inventories = new HashSet<InventoryComponent>();
+public HashSetReader<InventoryComponent> Inventories { get; private set; }
+
+private void OnBlocksChanged(CubeGridComponent.BlocksChangedArgs blocks)
+{
+    foreach (var removed in blocks.RemovedBlocks) RemoveInventories(removed);
+    foreach (var added   in blocks.AddedBlocks)   AddInventories(added);
+}
+```
+
+`AddInventories` adds `block.Entity.All<InventoryComponent>()` for **every block on the grid**.
+Conveyor plumbing is never consulted. So iterating `Inventories` gives all storage on the grid,
+connected or not.
+
+**Observed symptom:** an empty container welded onto a ship and attached to nothing still withdrew
+from the entire ship and still queued work at its assemblers. A container on a *separate* grid
+behaved correctly — but only because a different grid has a different `InventorySystemComponent`,
+so the one case that looked right was right for the wrong reason.
+
+**The conveyor-scoped API instead:**
+
+```csharp
+// Keen.Game2.Simulation.WorldObjects.CubeGrids.ResourceDistribution.Conveyors.ConveyorSystemComponent
+public static ReachableInventoriesEnumerator IterateReachableInventories(
+    InventoryComponent invStart, ItemDefinition? filterItem,
+    bool followEdgeDirection = true, bool mustContainTheItem = false)
+
+public static ReachableInventoriesEnumerator IterateReachableInventories(
+    int startNodeIdx, ConveyorSystemComponent systemFrom, ItemDefinition? filterItem,
+    bool followEdgeDirection = true, bool mustContainTheItem = false,
+    InventoryComponent? ignoreInventory = null)
+```
+
+Documented parameter semantics, straight from the XML:
+
+- `followEdgeDirection` — "direction of the search. If true, search inventories that are **reachable
+  from** start. If false, search inventories that **can reach** start." **A withdrawal wants
+  `false`.** This is not symmetric: conveyor edges are directional.
+- `filterItem` — "item that must be able to pass through, **if null, filters are ignored**". Passing
+  null gives topological reachability, so the walk can run once per action instead of once per item.
+- `mustContainTheItem` — restricts to inventories holding the item.
+- The 4-arg overload passes `invStart` as `ignoreInventory`, so **the start inventory is excluded**
+  from the results; callers must add it themselves.
+- Returns `ReachableInventoriesEnumerator.Empty` when `invStart.ConveyorSystem` is null — the normal
+  case for a lone container, not an error.
+
+Every engine transfer path uses this, which is the tell that it is the intended surface:
+`PullAsync` uses `(invTo, itemDef, followEdgeDirection: false, mustContainTheItem: true)`,
+`PushAsync`/`PushAllAsync` use the default direction.
+
+`ConveyorSystemComponent.TryGetGroup(DEntity block, int subgraphNodeId = 0)` returns a
+`ConveyorGroup` whose `Blocks` is what `ItemConverterComponent` iterates for its child-request
+delegation — the same scope, reached a different way.
+
+**Lesson, and it is CLAUDE.md's "Bias Against Confirmation".** `InventorySystemComponent.Inventories`
+was found first, was plausible, produced working withdrawals in every test on a normally-plumbed
+base, and was wrong. The first file found is rarely the whole story; the check that would have caught
+it is "what does the engine itself call to do this?", which points at the conveyor graph every time.

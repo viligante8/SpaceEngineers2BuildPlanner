@@ -7,7 +7,10 @@ using System.Text;
 using Keen.Game2.Client.GameSystems.PlayerControl;
 using Keen.Game2.Simulation.GameSystems.BuildPlanners;
 using Keen.Game2.Simulation.GameSystems.Player;
+using Keen.Game2.Simulation.WorldObjects.CubeBlocks.Production.ItemConverters;
+using Keen.Game2.Simulation.WorldObjects.Tools;
 using Keen.VRage.Core.Game.Systems;
+using Keen.VRage.DCS.Components;
 
 namespace BuildPlanner;
 
@@ -17,8 +20,9 @@ namespace BuildPlanner;
 /// **Why this exists.** A game restart plus world load costs about five minutes, so the expensive
 /// resource is not log space, it is *round trips*. Two things reduce them:
 ///
-/// 1. A dump key (SHIFT + the withdraw key) snapshots live state on demand, so a question can be
-///    asked at the exact moment something looks wrong rather than being guessed at beforehand.
+/// 1. A dump key (SHIFT + ALT + CTRL + the withdraw key) snapshots live state on demand, so a
+///    question can be asked at the exact moment something looks wrong rather than being guessed
+///    at beforehand.
 /// 2. A **file-driven query list**, so asking a NEW question needs no rebuild and no restart — the
 ///    game holds the DLL open, so a code change would force a relaunch, whereas a data change does
 ///    not. Write paths into
@@ -47,6 +51,7 @@ internal static class Diagnostics
         {
             Log.Write($"  sessions: client={(clientSession != null)} server={(serverSession != null)}");
             DumpQueue(queue);
+            DumpConverters(serverSession);
             DumpTool();
             DumpPlannerChain(clientSession);
             DumpServerPlanner(clientSession, serverSession);
@@ -65,6 +70,127 @@ internal static class Diagnostics
         Log.Write($"  queue: {queue.Count} block(s)");
         foreach (var block in queue.Blocks)
             Log.Write($"    - {block?.UIData?.Name.ToString() ?? "?"}");
+    }
+
+    /// <summary>
+    /// The item converters SHIFT-produce would reach, and what they are doing.
+    ///
+    /// Produce is the one action whose result is invisible at the moment of pressing the key: the
+    /// components appear minutes later, somewhere else. When it looks like nothing happened, the
+    /// question is always one of "was a converter found", "does it have a recipe for this", "was its
+    /// queue full" — so the dump answers all three without another game restart.
+    /// </summary>
+    private static void DumpConverters(Session? serverSession)
+    {
+        if (serverSession == null)
+        {
+            Log.Write("  converters: no server session");
+            return;
+        }
+
+        try
+        {
+            var character = PlayerAccess.GetLocalCharacter(serverSession);
+            var provider = character?.FirstOrDefault<IInteractedEntityProvider>();
+            var target = provider?.InteractedEntity;
+
+            if (target == null)
+            {
+                Log.Write("  converters: not aiming at anything (aim at a block to see its reach)");
+                return;
+            }
+
+            var converters = InventorySources.CollectConvertersFrom(target);
+            Log.Write($"  converters reachable from '{target.DebugName}': {converters.Count}");
+
+            foreach (var converter in converters)
+            {
+                if (converter == null) continue;
+
+                var definition = converter.Definition;
+                Log.Write($"    - {ComponentProduction.Describe(converter)}" +
+                          $" crafting={converter.Crafting}" +
+                          $" maxQueue={definition?.MaxQueueSize.ToString() ?? "?"}");
+
+                DumpConverterQueue(converter);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error("dumping converters failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// One converter's current and queued recipes, including who asked for each.
+    /// </summary>
+    /// <remarks>
+    /// **<c>Requester</c> is the point of this method.** It is documented as "Entity of another
+    /// ItemConverterComponent that requested production of this item", so it is the direct evidence
+    /// for the sub-component cascade: a recipe this mod enqueued has no requester, while one the
+    /// engine delegated downward names the assembler that asked for it. Without this line, "did the
+    /// cascade happen" could only be guessed at from queue depths.
+    ///
+    /// The current recipe lives in a separate <c>ConversionQueueItem</c> data slot from the pending
+    /// <c>ConversionQueueData.ConversionQueue</c>, so both are read — a converter partway through the
+    /// only thing it was given would otherwise look idle with an empty queue.
+    /// </remarks>
+    private static void DumpConverterQueue(ItemConverterComponent converter)
+    {
+        try
+        {
+            if (converter.Data.TryGet<ItemConverterComponent.ConversionQueueItem>(out var current))
+                Log.Write($"        current: {DescribeQueueItem(current)}");
+            else
+                Log.Write("        current: (idle)");
+        }
+        catch (Exception ex)
+        {
+            Log.Write($"        current: unreadable ({ex.GetType().Name})");
+        }
+
+        try
+        {
+            var queue = converter.Data.Get<ItemConverterComponent.ConversionQueueData>().ConversionQueue;
+            if (queue.Count == 0)
+            {
+                Log.Write("        queued: (none)");
+                return;
+            }
+
+            for (var i = 0; i < queue.Count; i++)
+                Log.Write($"        queued[{i}]: {DescribeQueueItem(queue[i])}");
+        }
+        catch (Exception ex)
+        {
+            // Not an error: the queue data may not be reserved on this block yet.
+            Log.Write($"        queued: unreadable ({ex.GetType().Name})");
+        }
+    }
+
+    /// <summary>
+    /// A queue entry as "&lt;what it makes&gt; x&lt;runs&gt; requestedBy=&lt;who&gt;".
+    /// </summary>
+    /// <remarks>
+    /// Recipes are named by their first output rather than <c>DisplayNameOverride</c>, which is null
+    /// on every vanilla recipe inspected — the output item is what the player and this mod both care
+    /// about anyway.
+    /// </remarks>
+    private static string DescribeQueueItem(ItemConverterComponent.ConversionQueueItem item)
+    {
+        var recipe = item.Recipe.Value;
+        var name = "?";
+
+        if (recipe != null && !recipe.Outputs.IsDefaultOrEmpty)
+        {
+            var output = recipe.Outputs[0];
+            name = $"{(int)output.Amount}x {output.Item?.DisplayName.ToString() ?? "?"}";
+        }
+
+        var requester = item.Requester?.Value;
+        var by = requester == null ? "you (top-level)" : requester.DebugName;
+
+        return $"{name} x{item.Times} run(s) requestedBy={by}";
     }
 
     private static void DumpTool()

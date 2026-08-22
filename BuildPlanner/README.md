@@ -26,8 +26,15 @@ component count. A 2.5m armour cube therefore asked for 1 Steel Plate instead of
 withdrawal is exact, the player got exactly one. The correct field is
 `CubeBlockDefinition.Items` — "computed when definition is post-processed".
 
-Still unconfirmed in-game: projections, HUD notifications, and the placement-mode guard. See
-"Awaiting in-game verification".
+**SHIFT-produce works, confirmed in-game 2026-08-22**, including the engine's sub-component cascade:
+enqueueing a component recipe at an assembler made the engine raise the ingot and ore sub-recipes on
+connected converters by itself. See "Producing components".
+
+**The full loop is confirmed end to end:** queue a block, `SHIFT+N` to produce, wait for the
+assembler and its delegated sub-recipes to finish, then `N` to withdraw exactly what was made.
+
+Testing produce also exposed a reach bug that had been present in the withdrawal all along — see
+"Fixed: reach ignored conveyors entirely".
 
 ## Running it
 
@@ -63,8 +70,10 @@ BuildPlanner ready.
 | **CTRL + N** | Withdraw, **keep** the queue (repeat building) | yes |
 | **ALT + CTRL + N** | Withdraw **×10**, keep the queue | yes |
 | **ALT + N** | Deposit ore, materials and components into the target (keeps tools) | yes |
-| **SHIFT + N** | Clear the queue without withdrawing | yes |
-| **SHIFT + CTRL + N** | Dump runtime state to the log (developer tool) | yes |
+| **SHIFT + N** | Produce the missing components at a connected assembler | yes — end to end |
+| **SHIFT + CTRL + N** | Produce **×10** | not separately — same path, multiplier only |
+| **SHIFT + ALT + N** | Clear the queue without withdrawing | action yes; new chord not re-exercised |
+| **SHIFT + ALT + CTRL + N** | Dump runtime state to the log (developer tool) | yes — used to confirm the cascade |
 
 Build planner input is ignored while the game is paused.
 
@@ -77,8 +86,52 @@ context per frame, so merely declining to act on it still takes it away from the
 Queueing takes the block's **outstanding** components, not a full recipe: a part-welded block that
 needs 29 more plates queues 29, not 30.
 
-Withdrawal pulls from the container you are aiming at, widening to every conveyor-connected
-inventory on that grid (25 were swept in testing).
+Withdrawal pulls from the container you are aiming at, widening to every inventory that can reach it
+across the **conveyor network**. An unattached container gives you only its own contents.
+
+## Producing components
+
+`SHIFT + N` at a block on a grid with an assembler queues the components you are **short of** —
+shortfall against your own inventory, the same subtraction the withdrawal uses — as recipes on that
+assembler. `SHIFT + CTRL + N` does it for ten times the queued blocks.
+
+Aim straight at an assembler to send the work there specifically; aim at anything else on the grid
+and the first reachable converter that has a recipe for each component is used.
+
+**Produce never clears the queue, on any path.** The components do not exist yet; you still have to
+come back and press `N` once they do, and the queue is the only record of what they were for.
+
+### Sub-components are the engine's job, not the mod's
+
+The obvious implementation walks the recipe tree — Steel Plate needs Iron Ingot needs Iron Ore — and
+enqueues each tier on the right block. **That work is already done in the engine**, so this mod does
+not do it.
+
+`ItemConverterComponent.TryEnqueueRecipe` takes a write pointer on `ConversionQueueData`. That marks
+the data changed, which fires `OnRecipeCompletedOrEnqueued` (`[OnChanged(typeof(ConversionQueueData))]`),
+which calls `MarkChildRequestsDirty()`, which schedules `UpdateRequestsWhileEnabled`. That job:
+
+1. `AccumulateIngredientsForFullQueue` — totals what the whole queue needs as input
+2. `RemoveItemsAlreadyInInventory` — subtracts what the block already holds
+3. `UpdatePersistentRequests` — raises conveyor pull requests, so the assembler feeds itself
+4. `UpdateChildRequests` — for anything still missing, finds converters **on the same conveyor
+   group** that list the item in a recipe's `Outputs` and enqueues the child recipe on them, passing
+   itself as the `requester`
+
+Step 4 recurses, because the child's own queue change marks *it* dirty in turn. So one enqueued
+Steel Plate recipe cascades down to ore on its own. The engine also spreads one item's demand across
+every capable converter (`UpdateRequestsInAvailableConverters` divides by the candidate count) and
+retracts the request if the parent's queue changes (`ClearChildRequestsOfPreviousChildren`).
+
+Reimplementing any of that would duplicate engine behaviour and drift from it on the next patch.
+The mod enqueues the top-level component recipe and stops.
+
+### Known gaps in produce
+
+- **Progression-locked recipes are not filtered.** The recipe walk mirrors the one
+  `StreamedProductionInfoSessionComponent.TryEnqueueAsync` performs before enqueueing, so a recipe
+  found here is one the terminal would also accept — but whether the engine refuses a locked recipe
+  at a lower layer is unconfirmed.
 
 `BuildPlannerWithdraw` appears in **Options → Controls → Building** and can be rebound; the mod
 respects a rebind rather than forcing N.
@@ -93,6 +146,7 @@ consumed by exactly one context per frame.
 - **Exact shortfall** via the engine's own `InventoryComponent.FindMissingItems`
 - Withdrawal from the aimed container plus the grid's conveyor network
 - Deposit-all
+- **Production** at a conveyor-reachable assembler, with the engine cascading sub-components
 - Outcome reported on every path (withdrew / partial / nothing found / nothing queued / no target)
 - Rebindable key registered in the controls menu
 
@@ -104,7 +158,7 @@ your tools, and HUD notifications.
 
 ## Previously awaiting verification (all now confirmed)
 
-Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, building is not done.
+Kept as a record of what was uncertain and how each was settled — not as an outstanding list.
 
 1. **Projections.** Queueing now reads the welder's own target rather than hunting for the block
    placer, and the tool component that supplies it also owns the projection state, so projections
@@ -123,6 +177,42 @@ Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, bu
    `CloseHUD`, and queueing additionally requires its block panel (`_screen`) to be open.
    *Test:* enter placement mode and right-click — nothing should be queued; then switch back to the
    welder and confirm queueing still works.
+
+## Fixed: reach ignored conveyors entirely (2026-08-22)
+
+Fixed and confirmed in-game 2026-08-22.
+
+**Symptom, from a test run:** an empty container welded onto a ship but *plumbed to nothing* still
+withdrew from the whole ship and still queued work at its assemblers. A standalone container on its
+own grid correctly reported nothing available.
+
+**Root cause.** Both sweeps used `InventorySystemComponent.Inventories`, which is not the conveyor
+network despite the name. It is filled by `OnBlocksChanged` -> `AddInventories(block)` for every
+block on the grid, so conveyor plumbing never enters into it. The separate-grid case worked only
+because a different grid has a different `InventorySystemComponent` — the right answer for the wrong
+reason, which is why it looked correct.
+
+The engine never uses that set to move anything. `PullAsync`, `PushAllAsync` and
+`TransferByDefAsync` all iterate the conveyor graph instead:
+
+```csharp
+// InventorySystemComponent.PullAsync
+foreach (var inv in ConveyorSystemComponent.IterateReachableInventories(
+             invTo, itemDef, followEdgeDirection: false, mustContainTheItem: true))
+```
+
+**Fix.** `InventorySources.Reachable` now walks
+`ConveyorSystemComponent.IterateReachableInventories(start, null, followEdgeDirection: false)` —
+`followEdgeDirection: false` being documented as "search inventories that **can reach** start", the
+correct direction for a withdrawal and one that honours one-way topology. `filterItem: null` ignores
+per-item filters, so the walk runs once per action rather than once per item.
+
+**Both** sweeps were fixed, not just the reported one: withdrawal and the assembler search shared the
+mistake, so an unattached container could also dispatch production. The converter search now also
+matches how the engine scopes its own delegation (`conveyorGroup.Blocks`).
+
+Transfers still use `TransferByDef`, which is unchanged and already verified — only the choice of
+which inventories are eligible moved.
 
 ## Known limitations (decided, not oversights)
 
@@ -145,8 +235,9 @@ right-click so it is never claimed while a terminal or inventory screen is open.
 
 ## Not working yet
 
-1. **SHIFT variants (produce / produce ×10)** are deliberately unmapped rather than silently behaving
-   like a plain withdraw.
+1. **Produce ×10 and the moved SHIFT+ALT clear-queue chord have not been separately exercised.** Both
+   share their code paths with actions that have been verified, so this is a gap in testing rather
+   than a known defect.
 2. **The terminal queue screen.** The queue is now mirrored into the engine's own
    `BuildPlannerData.PlannedBlocks`, which `TerminalScreenViewModel` already binds to
    (`BuildPlannerBlocks`, `UpdateBuildPlannerBlocks`, `BuildPlannerBlock_ClearAll`,
@@ -160,18 +251,21 @@ right-click so it is never claimed while a terminal or inventory screen is open.
 
 ## Logging
 
-Outcomes, warnings, errors and binding results always log. The verbose per-click tracing (entity
-dumps, component lists, inventory contents) is **off by default** — it made a single right-click
-write a dozen lines and buried the outcome.
+Outcomes, warnings, errors and binding results always log.
 
-Turn it back on by creating an empty file (no rebuild, no launch-option change):
+Verbose per-click tracing (entity dumps, component lists, inventory contents) is **on by default** —
+a game restart plus world load costs about five minutes, so a run that failed to record something
+needed is far more expensive than a large log file.
+
+Silence it by creating an empty file (no rebuild, no launch-option change):
 
 ```
-%APPDATA%\SpaceEngineers2\BuildPlanner\debug
+%APPDATA%\SpaceEngineers2\BuildPlanner\quiet
 ```
 
-Read once per run. Every branch still reports *something* without it (CLAUDE.md, "A silent code path
-is a broken code path"); the flag only restores the supporting detail.
+Read once per run, so create it before launching. Every branch still reports *something* with the
+flag set (CLAUDE.md, "A silent code path is a broken code path"); it only drops the supporting
+detail.
 
 ## Tests
 
@@ -180,13 +274,15 @@ cd BuildPlanner.Tests
 dotnet test
 ```
 
-24 tests, covering the logic that is decidable without the game running:
+56 tests, covering the logic that is decidable without the game running:
 
 | Unit | Why it is tested |
 |---|---|
 | `Modifiers.Resolve(ctrl, alt)` | branch order decides what ALT+CTRL means |
 | `ComponentWithdrawal.Classify` | picks the message the player acts on |
 | `BuildPlannerQueue.Accumulate` | merge + x10 must apply to *every* occurrence |
+| `ComponentProduction.RunsNeeded` | rounding down leaves the player one component short |
+| `ComponentProduction.Classify` | Partial must never be reported as Complete |
 
 Each was extracted from an engine-coupled caller specifically to be testable, and each has been
 mutation-checked — breaking the logic makes them fail, so they are not vacuous.
@@ -218,6 +314,8 @@ instance — must be copied to the output folder.
 | `BuildPlannerController.cs` | Dispatches input to queue / withdraw / deposit |
 | `BuildPlannerQueue.cs` | Planned blocks → merged component totals |
 | `ComponentWithdrawal.cs` | The transfer and its outcome |
+| `ComponentProduction.cs` | Enqueues component recipes at reachable converters |
+| `InventoryShortfall.cs` | Engine-computed "what am I short of", shared by both |
 | `InventorySources.cs` | Aimed container → conveyor-reachable inventories |
 | `IntegrityToolAccess.cs` | The welder's current target — what to queue |
 | `EngineQueueMirror.cs` | Mirrors the queue into the engine's `BuildPlannerData` |

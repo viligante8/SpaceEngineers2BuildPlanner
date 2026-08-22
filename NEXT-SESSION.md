@@ -5,8 +5,56 @@
 An SE2 **plugin** (not a data mod) that reproduces SE1's Build Planner: queue blocks, press a key at
 a container, receive exactly the components you are missing.
 
-**The withdrawal engine works and is verified in-game.** **Queueing was broken** and is fixed but
-untested — see "Immediate next step". Read `BuildPlanner/README.md` for controls and gaps.
+**Withdrawal, queueing and production all work and are verified in-game.** Read
+`BuildPlanner/README.md` for the control table and the remaining gaps.
+
+## State
+
+**Everything in the control table is working, and the conveyor fix is confirmed (2026-08-22).**
+
+Produce enqueues at the assembler, the engine's sub-component cascade fires on its own, and reach is
+now conveyor-scoped for both withdrawal and production.
+
+What has *not* been separately exercised — all sharing verified code paths, so gaps in testing rather
+than known defects:
+
+- **Produce ×10** (`SHIFT+CTRL+N`) — same path as produce, only the multiplier differs
+- **`SHIFT+ALT+N`** (clear queue) on its *new* chord — the action itself was verified before the
+  chord moved; `SHIFT+ALT+CTRL+N` was exercised, since the dump is what confirmed the cascade
+
+**The full loop is confirmed (2026-08-22):** queue a block, `SHIFT+N` to produce, wait for the
+assembler (and the sub-recipes it delegated) to finish, then `N` to withdraw exactly what was made.
+
+## Test steps (for re-running after an engine update)
+
+These are the checks that established the feature works. Re-run them after an SE2 update, since the
+plugin binds to method signatures and private field names.
+
+**Test 1 — basic produce.** Stand at a base with an assembler and ore/ingots available. Queue a block (right-click it
+with a welder), aim at the assembler or any conveyor-connected block, press **SHIFT + N**.
+
+Expect in the log and on the HUD:
+
+```
+  requires 30 x Steel Plate
+  producing 30 x Steel Plate (30 run(s)) at 'Assembler500'
+notify: Build Planner: producing 30x Steel Plate
+```
+
+Then open the assembler's production screen and confirm the recipe is really queued there.
+
+**Test 2 — the cascade.** Enqueue a component whose ingredients the assembler does *not* have, and
+confirm the engine raises the sub-recipes itself (ingots at a refinery, ore pulled over the conveyor)
+without the mod asking. The dump's `requestedBy=` field is the evidence: a child recipe names the
+assembler that asked for it. **Confirmed working 2026-08-22**; the mechanism is recorded in
+`notes/build-planner-api.md`.
+
+**Test 3 — reach and failure paths**, all of which report rather than going silent: no assembler on the grid
+(`no assembler or refinery connected`), a component nothing can make (`cannot make X`), and a full
+assembler queue (`would not accept ...`, logged, then the next converter is tried).
+
+If it looks like nothing happened, press **SHIFT+ALT+CTRL+N** — the dump now lists every converter
+it can reach, whether each is crafting, and how deep its queue is.
 
 ## Read before touching plugin code
 
@@ -16,21 +64,18 @@ untested — see "Immediate next step". Read `BuildPlanner/README.md` for contro
 2. `CLAUDE.md`, sections "Debugging Runtime Code" and "SE2 Code Mods Via Plugins".
 3. `notes/build-planner-api.md` — verified engine API surface.
 
-## State: working and verified in game
+## Deliberate scope, not oversights
 
-Every interaction has been exercised in a real world and confirmed: queueing (real blocks and
-projections), withdrawal, keep-queue, x10, deposit, clear, the placement-mode and pause guards, and
-HUD notifications. See the control table in `BuildPlanner/README.md`.
+Queueing (real blocks and projections), withdrawal, keep-queue, x10, deposit, clear, production, the
+placement-mode and pause guards, and HUD notifications have all been exercised in a real world.
 
-Nothing is known broken. What is left is deliberate scope, recorded in the README:
+Nothing is known broken. What is left is deliberate:
 
-1. **SHIFT-produce** (SE1 queues components at an assembler) is not implemented. It needs production
-   pipeline integration that was never investigated.
-2. **No queue UI.** The engine's own build planner screen cannot be driven -
+1. **No queue UI.** The engine's own build planner screen cannot be driven -
    `BuildPlannerData` never replicates to the client, so the terminal cannot display it
    (`notes/build-planner-api.md`). Building our own G-menu affordance was considered and deferred.
-3. **Multiplayer is unverified.** Transfers run against the server session in-process.
-4. **Queue range is the welder's reach** - a deliberate decision with the reasoning in the README.
+2. **Multiplayer is unverified.** Transfers run against the server session in-process.
+3. **Queue range is the welder's reach** - a deliberate decision with the reasoning in the README.
 
 ## If something breaks after a game update
 
@@ -41,7 +86,9 @@ hook it installs; a missing one is the first thing to check. The private members
 
 ## Debugging tools
 
-**SHIFT+CTRL+N** dumps live state to the log: queue, captured tool, per-player-data chain.
+**SHIFT+ALT+CTRL+N** dumps live state to the log: queue, **reachable item converters** (with
+crafting state and queue depth), captured tool, per-player-data chain. The chord moved when
+SHIFT/SHIFT+CTRL were given to produce.
 
 `%APPDATA%\SpaceEngineers2\BuildPlanner\queries.txt` drives that dump - dotted paths from the roots
 `tool`, `planner`, `clientsession`, with `[index]` and a `!N` depth suffix. It is re-read every dump,
@@ -50,16 +97,18 @@ open: a code change forces a relaunch and a world load, roughly five minutes.
 
 ## Logging
 
-Verbose per-click tracing is now **off by default** (it buried the outcome lines under a dozen
-entity dumps per right-click). Outcomes, warnings, errors and binding results always log.
+Verbose per-click tracing is **on by default**; outcomes, warnings, errors and binding results
+always log regardless.
 
-Re-enable by creating an empty file — no rebuild, no launch-option change:
+Silence it by creating an empty file — no rebuild, no launch-option change:
 
 ```
-%APPDATA%\SpaceEngineers2\BuildPlanner\debug
+%APPDATA%\SpaceEngineers2\BuildPlanner\quiet
 ```
 
-Read once per run, so create it before launching.
+Read once per run, so create it before launching. (Earlier revisions of this file described a
+`debug` file that enabled tracing; no such flag exists — `Log.ProbeDebugFlag` probes for `quiet` and
+defaults to verbose.)
 
 Log: `%APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log` (deliberately not under `Temp\Logs`,
 which the game clears on startup).
@@ -71,7 +120,7 @@ cd BuildPlanner
 dotnet build -p:GameDir="F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2"
 
 cd BuildPlanner.Tests
-dotnet test          # 24 tests, pure logic only
+dotnet test          # 56 tests, pure logic only
 ```
 
 **The game must be closed to build** — it holds the DLL open (MSB3021 otherwise). The workflow that
