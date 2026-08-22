@@ -20,6 +20,11 @@
     <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
   </ItemGroup>
 
+  <!-- The plugin exposes no public API; the unit-tested logic is internal. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="BuildPlanner.Tests" />
+  </ItemGroup>
+
   <ItemGroup>
     <Reference Include="VRage.Core">        <HintPath>$(GameDir)\VRage.Core.dll</HintPath>        <Private>false</Private></Reference>
     <Reference Include="VRage.Core.Game">   <HintPath>$(GameDir)\VRage.Core.Game.dll</HintPath>   <Private>false</Private></Reference>

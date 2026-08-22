@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+
+    <!-- Override with: dotnet test -p:GameDir=... -->
+    <GameDir Condition="'$(GameDir)' == ''">F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2</GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BuildPlanner\BuildPlanner.csproj" />
+  </ItemGroup>
+
+  <!--
+    The engine assemblies are referenced here as well as in the main project.
+
+    Private=TRUE here, unlike the plugin (which must never copy the game's own DLLs beside itself).
+    The test host is a normal process with no game assemblies loaded, so anything a test touches at
+    runtime must be in the output folder. Tests that use FixedPoint failed with
+    "Could not load file or assembly 'VRage.Library'" until this was flipped — and the earlier tests
+    passed only because they touch nothing but BuildPlanner's own enums.
+  -->
+  <ItemGroup>
+    <Reference Include="VRage.Core">        <HintPath>$(GameDir)\VRage.Core.dll</HintPath>        <Private>true</Private></Reference>
+    <Reference Include="VRage.Core.Game">   <HintPath>$(GameDir)\VRage.Core.Game.dll</HintPath>   <Private>true</Private></Reference>
+    <Reference Include="VRage.Library">     <HintPath>$(GameDir)\VRage.Library.dll</HintPath>     <Private>true</Private></Reference>
+    <Reference Include="VRage.Input">       <HintPath>$(GameDir)\VRage.Input.dll</HintPath>       <Private>true</Private></Reference>
+    <Reference Include="VRage.DCS">         <HintPath>$(GameDir)\VRage.DCS.dll</HintPath>         <Private>true</Private></Reference>
+    <Reference Include="VRage.Game">        <HintPath>$(GameDir)\VRage.Game.dll</HintPath>        <Private>true</Private></Reference>
+    <Reference Include="VRage.UI.Shared">   <HintPath>$(GameDir)\VRage.UI.Shared.dll</HintPath>   <Private>true</Private></Reference>
+    <Reference Include="Game2.Client">      <HintPath>$(GameDir)\Game2.Client.dll</HintPath>      <Private>true</Private></Reference>
+    <Reference Include="Game2.Game">        <HintPath>$(GameDir)\Game2.Game.dll</HintPath>        <Private>true</Private></Reference>
+    <Reference Include="Game2.Simulation">  <HintPath>$(GameDir)\Game2.Simulation.dll</HintPath>  <Private>true</Private></Reference>
+    <Reference Include="Avalonia.Base">     <HintPath>$(GameDir)\Avalonia.Base.dll</HintPath>     <Private>true</Private></Reference>
+  </ItemGroup>
+
+</Project>
