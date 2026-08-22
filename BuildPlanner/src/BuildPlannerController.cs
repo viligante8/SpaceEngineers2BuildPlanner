@@ -40,11 +40,13 @@ internal sealed class BuildPlannerController
     internal BuildPlannerQueue Queue => _queue;
 
     /// <summary>Add a block's requirements to the queue. Bound to the queueing input.</summary>
-    internal void QueueBlock(CubeBlockDefinition? block)
+    internal void QueueBlock(CubeBlockDefinition? block, CubeBlockComponent? built = null)
     {
         if (block == null) return;
 
-        _queue.Add(block);
+        // Queue what is still OUTSTANDING, not the whole recipe. A partly welded block needs the
+        // remainder; asking for a full block's worth hands the player components they already put in.
+        _queue.Add(block, BlockRequirements.Remaining(built, block));
         _notifier.QueuedBlock(block.UIData?.Name.ToString() ?? "block", _queue.Count);
         EngineQueueMirror.Sync(_queue.Blocks, _clientSession());
     }
@@ -82,57 +84,22 @@ internal sealed class BuildPlannerController
             var targeted = IntegrityToolAccess.GetTargetedBlocks();
             if (targeted.Count > 0)
             {
-                foreach (var definition in targeted) QueueBlock(definition);
+                foreach (var (built, definition) in targeted) QueueBlock(definition, built);
                 return;
             }
 
-            var session = _session();
-            if (session == null)
-            {
-                _notifier.Warning("Build Planner: no active session");
-                return;
-            }
-
-            var character = PlayerAccess.GetLocalCharacter(session);
-
-            // The block placer is client-side (Game2.Client.GameSystems.BlockPlacement), so it lives
-            // on the CLIENT session's character - not the server character that owns the inventory.
-            // Both exist in-process and are confusingly both named "CompositeCharacterServer".
-            var clientCharacter = PlayerAccess.GetClientCharacter(_clientSession());
-            if (clientCharacter == null)
-            {
-                // Falling back to the server character is near-certain to fail — the block placer is
-                // a client-only component and the server character does not carry one — but it is
-                // kept so a layout we have not seen still gets a chance. Say which half is in use so
-                // a later "no placer" line is attributable.
-                Log.Debug("  debug: no client character; falling back to the server character" +
-                          " (the block placer is client-side, so this will likely find nothing)");
-            }
-
-            var placementTarget = PlayerAccess.GetAlignedBlockTarget(clientCharacter ?? character, _clientSession());
-            if (placementTarget != null)
-            {
-                if (placementTarget.BuildProgress >= 1f)
-                {
-                    _notifier.AlreadyComplete();
-                    return;
-                }
-
-                QueueBlock(placementTarget.Definition);
-                return;
-            }
-
-            // NO interaction-based fallback.
+            // No fallback. The integrity tool is the ONLY source.
             //
-            // There used to be one here: GetAimedEntity -> IInteractedEntityProvider ("what entity is
-            // being interacted with", i.e. the press-F target) on the SERVER character, then
-            // TryGet<CubeBlockComponent>. That answers a different question than "what is my welder
-            // pointed at" and could queue a block the player was not aiming at.
+            // A block-placer fallback used to sit here. It never resolved in welder mode - every
+            // right-click logged "no BlockPlacerEntityComponent on character" - but it resolves
+            // perfectly in block PLACEMENT mode, because that is when a block placer exists and has
+            // an aligned block. So the one situation it worked in was the one situation we must not
+            // queue in, and it defeated the placement-mode guard by running after it:
             //
-            // It is not kept as a safety net because it always produced *something* plausible, which
-            // is worse than nothing: the withdrawal is exact, so a wrong queue yields a confidently
-            // wrong amount that looks like a withdrawal bug. The welder's own provider
-            // (IntegrityToolAccess) is the correct source and is tried first.
+            //   Build Planner: no build tool active (equip a welder and aim at a block)   <- guard OK
+            //   notify: Build Planner: queued Gearforge (1 total)                          <- fallback
+            //
+            // Observed in game 2026-08-22. Queueing requires an active welder, full stop.
             _notifier.NothingToQueue();
         }
         catch (Exception ex)

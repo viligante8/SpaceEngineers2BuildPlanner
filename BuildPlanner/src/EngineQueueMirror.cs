@@ -51,7 +51,7 @@ internal static class EngineQueueMirror
             var planned = data.PlannedBlocks;
             if (planned == null)
             {
-                Log.Debug("  debug: BuildPlannerData.PlannedBlocks is null; not mirroring");
+                Log.Write("  mirror: BuildPlannerData.PlannedBlocks is null; nothing written");
                 return;
             }
 
@@ -59,7 +59,12 @@ internal static class EngineQueueMirror
             foreach (var block in queue)
                 if (block != null) planned.Add(block);
 
-            Log.Debug($"  debug: mirrored {planned.Count} block(s) into the engine build planner");
+            // Always logged, not debug-gated. This line is the whole point of the mirror being
+            // diagnosable: if it says N blocks were written and no screen shows them, the write
+            // works and the UI is the problem. If it never appears, the write is the problem.
+            // Those need completely different fixes, and without this line they are indistinguishable.
+            Log.Write($"  mirror: wrote {planned.Count} block(s) into BuildPlannerData" +
+                      " (should now be visible wherever the game surfaces the build planner)");
         }
         catch (Exception ex)
         {
@@ -82,13 +87,13 @@ internal static class EngineQueueMirror
         var tool = IntegrityToolAccess.Captured;
         if (tool == null)
         {
-            Log.Debug("  debug: no integrity tool captured; cannot reach per-player data");
+            Log.Write("  mirror: no build tool captured yet; cannot reach per-player data");
             return null;
         }
 
         if (clientSession == null)
         {
-            Log.Debug("  debug: no client session; cannot resolve the local player identity");
+            Log.Write("  mirror: no client session; cannot resolve the local player identity");
             return null;
         }
 
@@ -97,18 +102,24 @@ internal static class EngineQueueMirror
 
         if (_playerDataField?.GetValue(tool) is not IPerPlayerData perPlayerData)
         {
-            Log.Debug("  debug: IntegrityToolUIComponent._playerData unavailable");
+            Log.Write("  mirror: IntegrityToolUIComponent._playerData unavailable");
             return null;
         }
 
         var players = clientSession.SessionComponents?.TryGet<ClientPlayersSessionComponent>();
         if (players == null)
         {
-            Log.Debug("  debug: no ClientPlayersSessionComponent; cannot resolve identity");
+            Log.Write("  mirror: no ClientPlayersSessionComponent; cannot resolve identity");
             return null;
         }
 
-        return perPlayerData.GetPerPlayerData<BuildPlannerData>(players.LocalPlayerIdentity);
+        var identity = players.LocalPlayerIdentity;
+        var data = perPlayerData.GetPerPlayerData<BuildPlannerData>(identity);
+
+        if (data == null)
+            Log.Write($"  mirror: no BuildPlannerData for identity {identity}; nothing to write into");
+
+        return data;
     }
 
     private static FieldInfo? _playerDataField;

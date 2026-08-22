@@ -16,20 +16,43 @@ namespace BuildPlanner;
 /// </summary>
 internal sealed class BuildPlannerQueue
 {
+    /// <summary>
+    /// One queued block: what it is, and what it still needed when it was queued.
+    ///
+    /// The requirement is a snapshot rather than a live read. The player queues "what this block
+    /// needs now"; re-deriving it later would silently change the answer if someone welded the block
+    /// in between, and the CubeBlockComponent may not even exist by then.
+    /// </summary>
+    private readonly record struct Entry(CubeBlockDefinition Definition, List<ItemAmount> Required);
+
+    private readonly List<Entry> _entries = new List<Entry>();
     private readonly List<CubeBlockDefinition> _blocks = new List<CubeBlockDefinition>();
 
-    internal int Count => _blocks.Count;
+    internal int Count => _entries.Count;
 
+    /// <summary>Queued block definitions, for the engine mirror and the UI.</summary>
     internal IReadOnlyList<CubeBlockDefinition> Blocks => _blocks;
 
-    internal void Add(CubeBlockDefinition block)
+    /// <summary>
+    /// Queue a block along with the components it still needs.
+    /// </summary>
+    /// <param name="required">
+    /// Outstanding components, from <see cref="BlockRequirements.Remaining"/> — NOT the definition's
+    /// full recipe. A half-built block must only pull the remainder.
+    /// </param>
+    internal void Add(CubeBlockDefinition block, List<ItemAmount> required)
     {
-        if (block != null) _blocks.Add(block);
+        if (block == null) return;
+
+        _entries.Add(new Entry(block, required ?? new List<ItemAmount>()));
+        _blocks.Add(block);
     }
 
-    internal bool Remove(CubeBlockDefinition block) => _blocks.Remove(block);
-
-    internal void Clear() => _blocks.Clear();
+    internal void Clear()
+    {
+        _entries.Clear();
+        _blocks.Clear();
+    }
 
     /// <summary>
     /// Total components required by everything queued, merged per item type.
@@ -56,18 +79,9 @@ internal sealed class BuildPlannerQueue
     {
         var totals = new Dictionary<ItemDefinition, FixedPoint>();
 
-        foreach (var block in _blocks)
+        foreach (var entry in _entries)
         {
-            if (block == null) continue;
-
-            var items = block.Items;
-            if (items.IsDefaultOrEmpty)
-            {
-                Log.Write($"  WARNING: '{block.UIData?.Name}' has no computed Items; nothing to queue for it");
-                continue;
-            }
-
-            foreach (var required in items)
+            foreach (var required in entry.Required)
             {
                 if (required.Item == null) continue;
                 Accumulate(totals, required.Item, required.Amount, multiplier);
@@ -85,7 +99,7 @@ internal sealed class BuildPlannerQueue
         }
 
         if (result.Count == 0)
-            Log.Debug($"  debug: {_blocks.Count} queued block(s) produced NO component requirements");
+            Log.Write($"  {_entries.Count} queued block(s) need nothing further");
 
         return result;
     }

@@ -68,9 +68,9 @@ internal static class IntegrityToolAccess
     /// Returns an empty list rather than null: callers report "nothing to queue" and must not have to
     /// distinguish "no tool" from "no target" to stay safe.
     /// </summary>
-    internal static List<CubeBlockDefinition> GetTargetedBlocks()
+    internal static List<(CubeBlockComponent? Block, CubeBlockDefinition Definition)> GetTargetedBlocks()
     {
-        var result = new List<CubeBlockDefinition>();
+        var result = new List<(CubeBlockComponent?, CubeBlockDefinition)>();
 
         var component = _current;
         if (component == null)
@@ -104,7 +104,7 @@ internal static class IntegrityToolAccess
             var fromProvider = GetBlockFromProvider(component);
             if (fromProvider != null)
             {
-                result.Add(fromProvider);
+                result.Add((fromProvider, fromProvider.Definition));
                 return result;
             }
 
@@ -139,7 +139,7 @@ internal static class IntegrityToolAccess
                     continue;
                 }
 
-                result.Add(definition);
+                result.Add((block, definition));
             }
 
             Log.Debug($"  debug: tooltip lists {blocks.Count} block(s), {result.Count} unfinished");
@@ -192,7 +192,7 @@ internal static class IntegrityToolAccess
     /// <c>CubeBlockComponent.Definition</c> are both public - this uses the components as intended
     /// rather than reading anything the UI derived.
     /// </summary>
-    private static CubeBlockDefinition? GetBlockFromProvider(IntegrityToolUIComponent component)
+    private static CubeBlockComponent? GetBlockFromProvider(IntegrityToolUIComponent component)
     {
         _providerField ??= typeof(IntegrityToolUIComponent).GetField(
             "_interactedEntityProvider", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -230,7 +230,7 @@ internal static class IntegrityToolAccess
             return null;
         }
 
-        return block.Definition;
+        return block;
     }
 
     private static FieldInfo? _providerField;
