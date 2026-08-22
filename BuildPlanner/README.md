@@ -92,6 +92,17 @@ control whose inputs also belong to a control with *more* inputs ("Discard candi
 few inputs"). Vanilla depends on the same rule for F5 / SHIFT + F5, so SHIFT + N produces rather than
 withdrawing.
 
+**The area welder queues its whole selection.** One right-click takes every unfinished block the
+area covers, projections included, and reports once: `queued 12 blocks (12 total)`. Blocks already
+finished are skipped. Verified in game 2026-08-22 — `tooltip lists 4 block(s), 2 unfinished`.
+
+This needs two things that were each wrong at first. The tool must be *detected*: a plain welder
+refreshes through `IntegrityToolUIComponent.UpdateUI`, but an area welder goes through
+`AreaDetectionChanged` -> `UpdateAreaUI`, and with only the former hooked the area welder produced no
+log line at all, because it was never recognised as an active tool. And the *selection* must be read
+from the panel's model rather than the tool's interacted-entity provider, which carries exactly one
+entity — preferring it silently reduced an area to the block under the crosshair.
+
 Right-click is only *bound* while a welder or area welder is showing its block panel. The rest of the
 time the mod does not hold the button at all, so the game keeps it for dropping items in the
 inventory screen, removing projections, and placement mode. This has to be done by activating and

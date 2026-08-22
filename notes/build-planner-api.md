@@ -718,3 +718,37 @@ menu right-click on BlockKindTileModel 'Battery' with 3 variant(s):
 **Naming trap:** every grid size shares one `CubeBlockDefinition.UIData.Name` — all three batteries
 are "Battery". The per-size name is on the tile (`LocalizableBlockTypeDisplayName`), so any message
 about which variant was queued has to come from the tile, not the definition.
+
+## The area welder is a separate refresh path (2026-08-22)
+
+`IntegrityToolUIComponent` serves both welders, but they reach it differently:
+
+| Tool | Trigger | Builds the model in |
+|---|---|---|
+| welder | `OnEntityChanged` / `OnNewDetectionArrived` | `UpdateUI(Entity?)` |
+| area welder | `AreaDetectionChanged(Entity)` | `UpdateAreaUI()` |
+
+Hooking only `UpdateUI` meant the area welder was **never captured**, so the queue input context was
+never activated and right-click stayed with the game. The symptom was total silence — no log line, no
+notification — which is indistinguishable from a broken keybind and is exactly the failure mode
+CLAUDE.md warns about. `AreaDetectionChanged` is the better hook of the two: `UpdateAreaUI` is
+`async void`, so a detour on it returns at the first `await` regardless.
+
+`UpdateAreaUI` builds the panel model from the whole selection:
+
+```csharp
+foreach (Entity areaBlock in _areaDetector.AreaBlocks)
+    pooledList.Add((areaBlock.Get<CubeBlockComponent>(), ...Definition));
+foreach (var (_, projections) in _areaDetector.AreaProjections)
+    foreach (var item in projections) pooledList.Add((null, item.Item2));
+```
+
+so `_model.Blocks` is the area, projections included (with a null component, as projections have no
+built block). **Read the model, not `InteractedEntityProviderComponent`** — the provider carries one
+entity, so preferring it reduces an area welder to the block under the crosshair. The provider is
+only worth keeping as a fallback for when the model is momentarily absent.
+
+`CloseHUD` is not only teardown: `UpdateUI` and `UpdateAreaUI` both call it mid-refresh to dispose the
+previous screen before opening the next. Anything hooking it to mean "the tool stopped showing a
+block" will therefore fire constantly during normal aiming, and must be paired with a re-capture on
+the update path to be self-correcting.

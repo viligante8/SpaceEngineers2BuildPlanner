@@ -65,6 +65,38 @@ internal sealed class BuildPlannerController
         EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
+    /// <summary>
+    /// Queue everything the build tool is showing, reporting once.
+    ///
+    /// An area welder's panel lists every block its area covers — dozens, potentially — and each one
+    /// announcing itself would bury the HUD. A single block still gets its own name, since that is
+    /// the common case and the name is the useful part.
+    /// </summary>
+    internal void QueueBlocks(IReadOnlyList<(CubeBlockComponent? Built, CubeBlockDefinition Definition)> blocks)
+    {
+        if (blocks.Count == 0) return;
+
+        if (blocks.Count == 1)
+        {
+            QueueBlock(blocks[0].Definition, blocks[0].Built);
+            return;
+        }
+
+        var added = 0;
+        foreach (var (built, definition) in blocks)
+        {
+            if (definition == null) continue;
+
+            _queue.Add(definition, BlockRequirements.Remaining(built, definition));
+            added++;
+        }
+
+        if (added == 0) return;
+
+        _notifier.QueuedBlocks(added, _queue.Count);
+        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
+    }
+
     internal void ClearQueue()
     {
         // Report the no-op case distinctly: "queue cleared" when nothing was queued reads as though
@@ -105,7 +137,7 @@ internal sealed class BuildPlannerController
         var targeted = IntegrityToolAccess.GetTargetedBlocks();
         if (targeted.Count > 0)
         {
-            foreach (var (built, definition) in targeted) QueueBlock(definition, built);
+            QueueBlocks(targeted);
             return;
         }
 

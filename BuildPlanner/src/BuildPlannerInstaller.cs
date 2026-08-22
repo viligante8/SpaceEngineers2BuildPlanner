@@ -53,6 +53,7 @@ internal sealed class BuildPlannerInstaller
     private static Hook? _setMappingHook;
     private static Hook? _integrityToolHook;
     private static Hook? _integrityToolCloseHook;
+    private static Hook? _areaDetectionHook;
     private static Hook? _tilePressedHook;
     private static Hook? _sizeTilePressedHook;
     private static Hook? _subTilePressedHook;
@@ -214,6 +215,49 @@ internal sealed class BuildPlannerInstaller
 
         _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
         Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
+
+        // The area welder refreshes through a different path entirely.
+        //
+        // UpdateUI runs for a plain welder (OnEntityChanged / OnNewDetectionArrived), but an area
+        // welder's panel is driven by AreaDetectionChanged -> UpdateAreaUI. With only UpdateUI
+        // hooked, the area welder never captured the component, so right-click was never claimed and
+        // the whole feature was silent with that tool - no log line, no notification, nothing.
+        //
+        // AreaDetectionChanged is hooked rather than UpdateAreaUI because it is a plain void method;
+        // UpdateAreaUI is `async void`, so a detour there returns at its first await anyway.
+        var areaDetectionChanged = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent)
+            .GetMethod("AreaDetectionChanged", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+        if (areaDetectionChanged == null)
+        {
+            Log.Write("  WARNING: IntegrityToolUIComponent.AreaDetectionChanged not found;"
+                      + " the area welder will not queue");
+            return;
+        }
+
+        _areaDetectionHook = new Hook(areaDetectionChanged, HookedAreaDetectionChanged);
+        Log.Write("  hook installed on IntegrityToolUIComponent.AreaDetectionChanged");
+    }
+
+    private delegate void OriginalAreaDetectionChanged(
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self,
+        Keen.VRage.DCS.Components.Entity entity);
+
+    private static void HookedAreaDetectionChanged(
+        OriginalAreaDetectionChanged original,
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self,
+        Keen.VRage.DCS.Components.Entity entity)
+    {
+        original(self, entity);
+
+        try
+        {
+            IntegrityToolAccess.Capture(self, "AreaDetectionChanged");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("capturing the integrity tool component from the area detector failed", ex);
+        }
     }
 
     private delegate void OriginalCloseHUD(

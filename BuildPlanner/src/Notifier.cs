@@ -45,6 +45,15 @@ internal sealed class Notifier
     internal void QueuedBlock(string blockName, int queueSize) =>
         Info($"Build Planner: queued {blockName} ({queueSize} total)");
 
+    /// <summary>
+    /// One message for a whole area-welder selection.
+    ///
+    /// An area welder can show dozens of blocks at once, and reporting each one separately would
+    /// bury the HUD under its own notifications.
+    /// </summary>
+    internal void QueuedBlocks(int added, int queueSize) =>
+        Info($"Build Planner: queued {added} blocks ({queueSize} total)");
+
     internal void QueueCleared(int cleared) =>
         Info($"Build Planner: cleared {cleared} queued block(s)");
 

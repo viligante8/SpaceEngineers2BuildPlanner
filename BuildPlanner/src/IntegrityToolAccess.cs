@@ -41,13 +41,21 @@ internal static class IntegrityToolAccess
     /// <summary>The captured component, for callers that need its services (see EngineQueueMirror).</summary>
     internal static IntegrityToolUIComponent? Captured => _current;
 
-    /// <summary>Remember the component the game just updated the tooltip on.</summary>
-    internal static void Capture(IntegrityToolUIComponent? component)
+    /// <summary>
+    /// Remember the component the game just updated the tooltip on.
+    /// </summary>
+    /// <param name="source">
+    /// Which update path called us. A plain welder refreshes through <c>UpdateUI</c>, an area welder
+    /// through <c>AreaDetectionChanged</c> — and only the first was hooked at first, which is why the
+    /// area welder did nothing at all: without a capture there is no tool, so right-click was never
+    /// claimed and not one line reached the log.
+    /// </param>
+    internal static void Capture(IntegrityToolUIComponent? component, string source = "UpdateUI")
     {
         if (component == null) return;
 
         if (!ReferenceEquals(_current, component))
-            Log.Debug("  debug: captured IntegrityToolUIComponent from UpdateUI");
+            Log.Debug($"  debug: captured IntegrityToolUIComponent from {source}");
 
         _current = component;
 
@@ -100,36 +108,22 @@ internal static class IntegrityToolAccess
 
         try
         {
-            // Preferred: the tool's own interacted-entity provider. InteractedEntity is a public
-            // property and is the intended way to ask "what is this tool pointed at" - the same
-            // signal the tool feeds its own UI from (IntegrityToolUIComponent.OnNewDetectionArrived).
+            // The panel's own block list first, because it is the whole selection.
             //
-            // Note this is NOT the mistake the earlier build made. That looked the provider up on the
-            // server-side *character*, which answers a different question (the press-F interaction
-            // target) and returned a different block. This is the welder's provider.
-            var fromProvider = GetBlockFromProvider(component);
-            if (fromProvider != null)
-            {
-                result.Add((fromProvider, fromProvider.Definition));
-                return result;
-            }
-
-            // The provider carries one entity, so it cannot express an area-welder's multi-block
-            // selection or a projection that has no built entity yet. For those the tool's resolved
-            // block list is the right source - still engine data, (CubeBlockComponent, definition).
+            // The interacted-entity provider carries exactly ONE entity, so preferring it (as this
+            // did originally) silently reduced an area welder to the block under the crosshair: the
+            // provider answered, we returned, and the other blocks in the area were never seen.
+            // IntegrityToolUIComponent.UpdateAreaUI builds its model from every entry in
+            // _areaDetector.AreaBlocks *and* AreaProjections, so the model is the selection, and for
+            // a plain welder it simply holds one entry.
+            //
+            // It is also the more honest source generally: what the panel lists is exactly what the
+            // player is being shown, which is what "queue what I am looking at" should mean.
             var model = GetModel(component);
-            if (model == null)
-            {
-                Log.Write("  Build Planner: build tool has no block panel open (not aiming at a block?)");
-                return result;
-            }
+            if (model == null) return FromProvider(component, result);
 
             var blocks = model.Blocks;
-            if (blocks.Count == 0)
-            {
-                Log.Write("  Build Planner: block panel is empty (not aiming at a block?)");
-                return result;
-            }
+            if (blocks.Count == 0) return FromProvider(component, result);
 
             for (var i = 0; i < blocks.Count; i++)
             {
@@ -156,6 +150,32 @@ internal static class IntegrityToolAccess
             Log.Error("reading the block panel failed", ex);
             return result;
         }
+    }
+
+    /// <summary>
+    /// Last resort when the panel model is missing: the tool's interacted-entity provider.
+    ///
+    /// It carries exactly one entity, so it can express neither an area selection nor a projection —
+    /// which is precisely why it is no longer consulted first. It stays as a fallback because losing
+    /// single-block queueing to a momentarily absent model would be worse than a partial answer, and
+    /// it reports which path it took either way: a silent fallback is how the original ordering
+    /// problem stayed invisible.
+    /// </summary>
+    private static List<(CubeBlockComponent?, CubeBlockDefinition)> FromProvider(
+        IntegrityToolUIComponent component,
+        List<(CubeBlockComponent?, CubeBlockDefinition)> result)
+    {
+        Log.Debug("  debug: no block panel model; falling back to the interacted-entity provider");
+
+        var fromProvider = GetBlockFromProvider(component);
+        if (fromProvider != null)
+        {
+            result.Add((fromProvider, fromProvider.Definition));
+            return result;
+        }
+
+        Log.Write("  Build Planner: block panel is empty (not aiming at a block?)");
+        return result;
     }
 
     /// <summary>
