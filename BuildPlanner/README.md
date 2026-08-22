@@ -96,7 +96,13 @@ consumed by exactly one context per frame.
 - Outcome reported on every path (withdrew / partial / nothing found / nothing queued / no target)
 - Rebindable key registered in the controls menu
 
-## Awaiting in-game verification
+## Verified in game
+
+Everything in the control table above, plus: components for partly-built blocks (the outstanding
+amount, not a full recipe), projections, the placement-mode guard, the pause guard, deposit keeping
+your tools, and HUD notifications.
+
+## Previously awaiting verification (all now confirmed)
 
 Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, building is not done.
 

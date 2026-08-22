@@ -16,29 +16,37 @@ untested — see "Immediate next step". Read `BuildPlanner/README.md` for contro
 2. `CLAUDE.md`, sections "Debugging Runtime Code" and "SE2 Code Mods Via Plugins".
 3. `notes/build-planner-api.md` — verified engine API surface.
 
-## Immediate next step: one session verifies everything outstanding
+## State: working and verified in game
 
-The mod's core loop is **confirmed working in-game**: right-click an unfinished block with a welder,
-press N at a container, receive exactly the missing components in the correct amounts.
+Every interaction has been exercised in a real world and confirmed: queueing (real blocks and
+projections), withdrawal, keep-queue, x10, deposit, clear, the placement-mode and pause guards, and
+HUD notifications. See the control table in `BuildPlanner/README.md`.
 
-Four things are built, compiling and deployed but **never observed running**. All four can be
-checked in a single session:
+Nothing is known broken. What is left is deliberate scope, recorded in the README:
 
-1. **Projections** — right-click a projected (holographic) block. Expect `queued <block> (N total)`.
-2. **HUD notifications** — watch the screen, not the log. Messages should appear on the HUD.
-3. **Terminal queue visibility** — queue a few blocks, open the terminal, look for them. The queue is
-   mirrored into the engine's own `BuildPlannerData`, which the terminal screen already binds to.
-4. **Placement-mode guard** — enter block placement mode and right-click. Nothing should queue
-   (RMB belongs to the game there). Switch back to the welder and confirm queueing still works.
+1. **SHIFT-produce** (SE1 queues components at an assembler) is not implemented. It needs production
+   pipeline integration that was never investigated.
+2. **No queue UI.** The engine's own build planner screen cannot be driven -
+   `BuildPlannerData` never replicates to the client, so the terminal cannot display it
+   (`notes/build-planner-api.md`). Building our own G-menu affordance was considered and deferred.
+3. **Multiplayer is unverified.** Transfers run against the server session in-process.
+4. **Queue range is the welder's reach** - a deliberate decision with the reasoning in the README.
 
-If anything misbehaves, create `%APPDATA%\SpaceEngineers2\BuildPlanner\debug` before launching and
-repeat — every branch reports which path it took.
+## If something breaks after a game update
 
-## Then
+This is a plugin bound to method signatures and private field names. The startup log names every
+hook it installs; a missing one is the first thing to check. The private members relied on are
+`IntegrityToolUIComponent._interactedEntityProvider`, `._model`, `._screen`, `._playerData`, and
+`InventoryNotificationsSessionComponent._ui`.
 
-1. **Update the README** — move whatever passed out of "Awaiting in-game verification".
-2. Remaining gaps are genuinely unstarted: SHIFT/produce variants, the `G` queue screen,
-   multiplayer. See `BuildPlanner/README.md`.
+## Debugging tools
+
+**SHIFT+CTRL+N** dumps live state to the log: queue, captured tool, per-player-data chain.
+
+`%APPDATA%\SpaceEngineers2\BuildPlanner\queries.txt` drives that dump - dotted paths from the roots
+`tool`, `planner`, `clientsession`, with `[index]` and a `!N` depth suffix. It is re-read every dump,
+so asking a new question costs no rebuild and no restart. That matters because the game holds the DLL
+open: a code change forces a relaunch and a world load, roughly five minutes.
 
 ## Logging
 
