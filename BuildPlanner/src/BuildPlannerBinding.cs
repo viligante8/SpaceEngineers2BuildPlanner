@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using Keen.Game2.Client.Input;
 using Keen.Game2.Client.UI.HUD.Notification;
@@ -31,6 +32,18 @@ internal static class BuildPlannerBinding
     private static InputContext? _context;
     private static BuildPlannerController? _controller;
     private static IInputProcessor? _processor;
+
+    /// <summary>
+    /// The controller, for entry points that are not input actions — the build menu queues through
+    /// the game's own UI handlers rather than through a binding (see <see cref="BlockMenuAccess"/>).
+    /// Null until Attach has run.
+    /// </summary>
+    internal static BuildPlannerController? Controller => _controller;
+
+    /// <summary>The HUD/log notification sink, shared by every entry point.</summary>
+    internal static Notifier Notifier => _notifier ??= new Notifier(ShowNotification);
+
+    private static Notifier? _notifier;
 
     /// <summary>
     /// Re-activate our context if something deactivated it.
@@ -159,18 +172,10 @@ internal static class BuildPlannerBinding
             return;
         }
 
-        if (!definitions.TryGetDefinition<InputActionDefinition>(
-                BuildPlannerInstaller.ToolTertiaryActionGuid, out var tertiary))
-        {
-            Log.Write("  ERROR: ToolTertiaryAction not found; input not bound");
-            return;
-        }
-
-        definitions.TryGetDefinition<InputActionDefinition>(
-            BuildPlannerInstaller.ToolSecondaryActionGuid, out var secondary);
-
-        // Withdraw/deposit gets its own key rather than sharing Mouse::Middle.
+        // Our actions are our own definitions, defaulting to N and its chords - not vanilla's
+        // actions borrowed for the purpose.
         //
+        // Withdraw/deposit deliberately does not share Mouse::Middle:
         // DisambiguatingControlActivationFilter.FilterOnControl consumes an input once per frame
         // ("Discard candidate control â€¦, input already consumed"), and ProcessActionsPerContext
         // assigns each control to exactly ONE context. Contexts compete for an input rather than
@@ -180,11 +185,17 @@ internal static class BuildPlannerBinding
         // Verified in game: right-click queueing logged fine while middle-click produced nothing.
         //
         // N is unbound in ActionControlMapping.def (checked against every InputId in that file).
-        var withdrawAction = GetOrCreateWithdrawAction(definitions);
+        BuildPlannerActions.EnsureCreated(definitions);
 
-        // Force a republish so the action lands in the mapping even if SetMapping already ran
+        // Force a republish so the actions land in the mapping even if SetMapping already ran
         // before this component initialised.
-        processorComponent.SetMapping(InjectActions(processorComponent.Mapping));
+        //
+        // Through the customisation component where possible, rather than straight into the
+        // processor: that path also rebuilds ControlCustomizationViewModel (so Options -> Controls
+        // lists the actions, under the category that may only have become resolvable just now) and
+        // re-applies the player's own bindings on top of the defaults.
+        if (!RepublishThroughCustomization())
+            processorComponent.SetMapping(InjectActions(processorComponent.Mapping));
 
         // Build our own layer-less context rather than reusing vanilla's ToolContext.
         //
@@ -203,42 +214,92 @@ internal static class BuildPlannerBinding
         // a projection are both Mouse::Right. An input is consumed by exactly ONE context per frame
         // (DisambiguatingControlActivationFilter), so an always-active context holding right-click
         // steals it from the game everywhere - observed as items refusing to drop and projections
-        // refusing to be removed.
+        // refusing to be removed. Our queue action is a separate definition that merely *defaults*
+        // to Mouse::Right; layer-less contexts are dispatched first (DispatchActions walks
+        // _activeContexts backwards), so ours takes the button while it is active, exactly as when
+        // it borrowed vanilla's ToolSecondaryAction. Rebinding it away ends the contest entirely.
         //
-        // So the withdraw key lives in a permanently active context, while right-click lives in its
+        // So the withdraw keys live in a permanently active context, while right-click lives in its
         // own context that is only active while a welder's block panel is showing. The rest of the
         // time the game owns right-click completely, because our context is not merely ignoring the
         // input - it is not there to compete for it.
-        var contextDefinition = new InputContextDefinition(new[] { withdrawAction });
+        var plannerActions = new List<InputActionDefinition>();
+        foreach (var action in BuildPlannerActions.Planner)
+            if (action.Definition != null) plannerActions.Add(action.Definition);
+
+        if (plannerActions.Count == 0)
+        {
+            Log.Write("  ERROR: no Build Planner actions were created; input not bound");
+            return;
+        }
 
         var hostEntity = inputComponent.Entity;
         _hostEntity = hostEntity;
 
         _controller = new BuildPlannerController(
-            new Notifier(ShowNotification),
+            Notifier,
             () => GetSession(hostEntity),
             () => GetClientSession(hostEntity));
 
-        _context = new InputContext(contextDefinition);
+        _context = new InputContext(new InputContextDefinition(plannerActions));
         _processor = processor;
         processor.ActivateContext(_context);
 
         EnableEngineInputLogging(processorComponent);
 
-        _context.SetTrigger(withdrawAction, () => _controller!.OnTertiaryAction());
-        Log.Write("  bound withdraw/deposit to BuildPlannerWithdraw (Keyboard::N)");
+        // One trigger per action, so what the player rebinds is what runs. The `performs` local is
+        // deliberate: capturing the loop variable's action inside the lambda is what keeps each
+        // closure bound to its own operation.
+        foreach (var action in BuildPlannerActions.Planner)
+        {
+            if (action.Definition == null) continue;
 
-        if (secondary != null)
+            var performs = action.Performs;
+            _context.SetTrigger(action.Definition, () => _controller!.Perform(performs));
+            Log.Write($"  bound {action.Name} to {DescribeBinding(processorComponent, action)}");
+        }
+
+        var queue = BuildPlannerActions.Queue;
+        if (queue.Definition != null)
         {
             // Created but NOT activated: IntegrityToolAccess turns it on when a welder starts showing
             // its block panel and off again when it stops.
-            _queueContext = new InputContext(new InputContextDefinition(new[] { secondary }));
-            _queueContext.SetTrigger(secondary, () => _controller!.OnSecondaryAction());
-            Log.Write("  bound queue to ToolSecondaryAction (Mouse::Right), active only with a welder out");
+            _queueContext = new InputContext(new InputContextDefinition(new[] { queue.Definition }));
+            _queueContext.SetTrigger(queue.Definition, () => _controller!.Perform(PlannerAction.Queue));
+            Log.Write($"  bound {queue.Name} to {DescribeBinding(processorComponent, queue)},"
+                      + " active only with a welder out");
         }
         else
         {
-            Log.Write("  WARNING: ToolSecondaryAction not found; queueing not bound");
+            Log.Write("  WARNING: queue action not created; queueing not bound");
+        }
+    }
+
+    /// <summary>
+    /// The binding an action currently has, for the startup log.
+    ///
+    /// Reports what the mapping actually holds rather than the shipped default, so a player who has
+    /// rebound something can see their choice took effect without launching the options menu.
+    /// </summary>
+    private static string DescribeBinding(
+        ActionInputProcessorBaseComponent processor, BuildPlannerAction action)
+    {
+        try
+        {
+            if (action.Definition == null) return "(not created)";
+
+            if (!processor.Mapping.TryGetActionControls(action.Definition, out var controls)
+                || controls.Count == 0)
+                return "(unbound)";
+
+            var described = new List<string>(controls.Count);
+            foreach (var control in controls) described.Add(control.ToString());
+            return string.Join(" / ", described);
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"describing the binding for {action.Name} failed", ex);
+            return "(unknown)";
         }
     }
 
@@ -370,107 +431,144 @@ internal static class BuildPlannerBinding
         }
     }
 
-    /// <summary>The Build Planner's withdraw action, created once and reused for every mapping.</summary>
-    private static InputActionDefinition? _withdrawAction;
+    /// <summary>
+    /// The control-customisation component, captured the first time it publishes a mapping.
+    /// It is the only route to a republish that also refreshes the controls menu.
+    /// </summary>
+    private static ControlCustomizationEngineComponent? _customization;
 
-    /// <summary>Default key: N is unbound in vanilla's ActionControlMapping.def.</summary>
-    private const string WithdrawActionName = "BuildPlannerWithdraw";
-
-    internal static InputActionDefinition GetOrCreateWithdrawAction(DefinitionManager? definitions = null)
+    internal static void NoteCustomizationComponent(ControlCustomizationEngineComponent component)
     {
-        if (_withdrawAction != null)
-        {
-            // The category may not have been resolvable when the action was first created (the
-            // controls menu is populated during startup, before definitions are all loaded), so
-            // fill it in as soon as a DefinitionManager is available.
-            if (!_categoryAssigned && definitions != null) TryAssignCategory(_withdrawAction, definitions);
-            return _withdrawAction;
-        }
-
-        var action = new InputActionDefinition(LocKey.FromString(WithdrawActionName), InputType.Digital);
-
-        // Name drives sorting and lookup in the controls UI.
-        TrySetPrivate(action, "<Name>k__BackingField", StringId.Get(WithdrawActionName));
-
-        definitions ??= Singleton<DefinitionManager>.Instance;
-        if (definitions != null) TryAssignCategory(action, definitions);
-
-        _withdrawAction = action;
-        return action;
+        _customization = component;
     }
 
-    private static bool _categoryAssigned;
-
     /// <summary>
-    /// ControlCustomizationViewModel drops any action whose Category is null or the hidden category,
-    /// and orders groups by OrderedControlCategories — so the action needs vanilla's
-    /// "BuildingControls" category (index 8 in that list) to appear in Options -> Controls.
+    /// Ask the customisation component to publish its base mapping again.
+    ///
+    /// Everything downstream then re-runs: our SetMapping hook injects any missing defaults,
+    /// ControlsViewModel is rebuilt, and UpdateMappings re-applies the player's customisations.
     /// </summary>
-    private static void TryAssignCategory(InputActionDefinition action, DefinitionManager definitions)
+    /// <returns>Whether the republish happened.</returns>
+    private static bool RepublishThroughCustomization()
     {
         try
         {
-            if (definitions.TryGetDefinition<ActionCategoryDefinition>(
-                    BuildPlannerInstaller.BuildingCategoryGuid, out var category))
+            if (_customization == null) return false;
+
+            // ActionControlMapping is a struct, so this cannot go through GetPrivateField.
+            var field = typeof(ControlCustomizationEngineComponent).GetField(
+                "_baseMappings", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            if (field?.GetValue(_customization) is not ActionControlMapping baseMapping)
             {
-                TrySetPrivate(action, "<Category>k__BackingField", category);
-                _categoryAssigned = true;
-                Log.Write("  action category set to BuildingControls");
+                Log.Write("  WARNING: ControlCustomization._baseMappings not readable;"
+                          + " publishing straight to the processor instead");
+                return false;
             }
+
+            _customization.SetMapping(baseMapping);
+            Log.Debug("  debug: republished the mapping through the customisation component");
+            return true;
         }
         catch (Exception ex)
         {
-            Log.Error("assigning action category failed", ex);
+            Log.Error("republishing through the customisation component failed", ex);
+            return false;
         }
     }
 
     /// <summary>
-    /// Add the Build Planner's actions to a mapping that is about to be published.
+    /// Add the Build Planner's actions to a mapping that is about to be published, each with its
+    /// default control.
     ///
-    /// Called from the ControlCustomizationEngineComponent.SetMapping hook so the binding survives
+    /// Called from the ControlCustomizationEngineComponent.SetMapping hook so the bindings survive
     /// every rebuild — the component reconstructs the processor mapping from its own _baseMappings
     /// whenever custom binds change, which silently discarded a direct addition to the processor.
+    ///
+    /// What lands here is the *base* mapping. The player's own choices are applied on top of it by
+    /// ControlCustomizationEngineComponent.UpdateMappings, which is why these defaults do not
+    /// overwrite a rebinding.
     /// </summary>
     internal static ActionControlMapping InjectActions(ActionControlMapping mapping)
     {
         // Create on demand: ControlCustomizationEngineComponent.SetMapping runs during startup,
         // before InputGameComponent.Init, and the controls menu is populated from *that* mapping.
-        // Waiting for Attach() meant the menu was built without our action and never rebuilt.
-        var action = GetOrCreateWithdrawAction();
+        // Waiting for Attach() meant the menu was built without our actions and never rebuilt.
+        BuildPlannerActions.EnsureCreated();
 
         var builder = mapping.ToBuilder();
+        var added = 0;
 
-        // Respect an existing binding: if the player has rebound this action in the controls menu,
-        // leave their choice alone.
-        if (builder.ContainsAction(action)) return mapping;
+        foreach (var action in BuildPlannerActions.All)
+        {
+            if (action.Definition == null) continue;
 
-        builder.AddControl(action, new DigitalControl(new DigitalInput(KeyboardInputs.N)));
+            // Already mapped: either we ran before, or the customisation layer put the player's
+            // choice here. Either way, do not touch it.
+            if (builder.ContainsAction(action.Definition)) continue;
+
+            var control = BuildPlannerActions.DefaultControl(action);
+            if (control == null) continue;
+
+            builder.AddControl(action.Definition, control);
+            added++;
+        }
+
+        if (added == 0) return mapping;
+
+        Log.Debug($"  debug: injected {added} default binding(s) into the mapping");
         return builder.MoveToMapping();
     }
 
     /// <summary>
-    /// Set an auto-property's backing field. InputActionDefinition's properties are all
-    /// `private set` because definitions are normally built by the content pipeline from .def files;
-    /// a plugin has no such file, so the instance is completed here.
+    /// Drop customised bindings that name no action, and republish if any were found.
+    ///
+    /// These are the wreckage of the bug this rework fixes: while the actions had no GUID, every
+    /// rebinding was written to disk as
+    /// <c>"Action": "00000000-0000-0000-0000-000000000000"</c>. Such an entry can never be resolved
+    /// again — <c>ActionControlEntry.Action</c> asserts and hands back a placeholder — so it sits in
+    /// the options file forever, doing nothing except making the controls menu look as though a
+    /// rebinding was saved.
+    ///
+    /// Only Guid.Empty is removed. Every definition loaded from a .def file has a real GUID, so no
+    /// legitimate customisation can look like this.
     /// </summary>
-    private static void TrySetPrivate(object instance, string backingFieldName, object value)
+    internal static void PurgeOrphanedCustomizations(ControlCustomizationEngineComponent component)
     {
         try
         {
-            var field = instance.GetType().GetField(
-                backingFieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-
-            if (field == null)
+            var part = GetPrivateField<CustomizedControlsOptionsPart>(component, "_customizedControls");
+            if (part == null)
             {
-                Log.Write($"  WARNING: field {backingFieldName} not found on {instance.GetType().Name}");
+                Log.Debug("  debug: no customised-controls options part; nothing to purge");
                 return;
             }
 
-            field.SetValue(instance, value);
+            var entries = part.CustomizedControls;
+            if (entries == null) return;
+
+            var guidField = typeof(CustomizedControlsOptionsPart.ActionControlEntry).GetField(
+                "_actionGuid", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            if (guidField == null)
+            {
+                Log.Write("  WARNING: ActionControlEntry._actionGuid not found; orphans left in place");
+                return;
+            }
+
+            // Backwards: removing from the list raises CollectionChanged, which makes the component
+            // rebuild and republish the mapping immediately.
+            for (var i = entries.Count - 1; i >= 0; i--)
+            {
+                if (guidField.GetValue(entries[i]) is not Guid guid || guid != Guid.Empty) continue;
+
+                entries.RemoveAt(i);
+                Log.Write("  removed an orphaned control customisation (no action GUID)");
+            }
         }
         catch (Exception ex)
         {
-            Log.Error($"setting {backingFieldName} failed", ex);
+            Log.Error("purging orphaned control customisations failed", ex);
         }
     }
 

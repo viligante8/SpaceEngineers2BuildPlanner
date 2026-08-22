@@ -57,15 +57,25 @@ BuildPlanner initializing...
   hook installed on ControlCustomizationEngineComponent.SetMapping
 BuildPlanner ready.
   action category set to BuildingControls
-  bound withdraw/deposit to BuildPlannerWithdraw (Keyboard::N)
-  bound queue to ToolSecondaryAction (Mouse::Right)
+  registered 9 input actions with the DefinitionManager
+  bound BuildPlannerWithdraw to Keyboard::N
+  bound BuildPlannerWithdrawKeep to Keyboard::N+Keyboard::Control
+  ...
+  bound BuildPlannerQueue to Mouse::Right, active only with a welder out
 ```
+
+Each `bound …` line reports the binding that is **actually in the mapping**, so a rebound key shows
+up there rather than the shipped default.
 
 ## Controls
 
-| Input | Action | Verified in game |
+Every row is a separate input action and is separately rebindable — see "Rebinding" below. The
+chords are only the defaults.
+
+| Default | Action | Verified in game |
 |---|---|---|
 | **Right-click** an unfinished block (welder equipped) | Queue the components it still needs | yes |
+| **Right-click** a block in the build menu (G) | Queue that block's full component list | yes — groups, kinds, refusals |
 | **N** | Withdraw queued components, clear the queue | yes |
 | **CTRL + N** | Withdraw, **keep** the queue (repeat building) | yes |
 | **ALT + CTRL + N** | Withdraw **×10**, keep the queue | yes |
@@ -76,6 +86,11 @@ BuildPlanner ready.
 | **SHIFT + ALT + CTRL + N** | Dump runtime state to the log (developer tool) | yes — used to confirm the cascade |
 
 Build planner input is ignored while the game is paused.
+
+A chord beats the plain key because `DisambiguatingControlActivationFilter` discards any candidate
+control whose inputs also belong to a control with *more* inputs ("Discard candidate control …, too
+few inputs"). Vanilla depends on the same rule for F5 / SHIFT + F5, so SHIFT + N produces rather than
+withdrawing.
 
 Right-click is only *bound* while a welder or area welder is showing its block panel. The rest of the
 time the mod does not hold the button at all, so the game keeps it for dropping items in the
@@ -88,6 +103,41 @@ needs 29 more plates queues 29, not 30.
 
 Withdrawal pulls from the container you are aiming at, widening to every inventory that can reach it
 across the **conveyor network**. An unattached container gives you only its own contents.
+
+## Queueing from the build menu
+
+Right-click any block tile in the build menu (G) to queue it, the way SE1 lets you plan a block you
+have not placed yet. The full recipe is queued, since nothing is built.
+
+**The menu's tiles are three deep**, which matters because right-clicking each behaves differently:
+
+| Tile | What it is | Right-click |
+|---|---|---|
+| `BlockGroupTileModel` | the grid tiles, the ones with a '+' | queues the first unlocked block under the group |
+| `BlockKindTileModel` | opens from a group; holds the grid sizes | queues the first unlocked size |
+| `BlockSizeModel` | a size in the right-hand panel | queues **exactly** that size |
+| tools, consumables, voxel hands | — | refused, with a message |
+
+Since a group or kind tile has to *choose* a size, the notification names the one it picked
+(`queued Battery 0.5 m`) rather than the generic block name — every grid size shares one
+`UIData.Name`, so "Battery" alone could not tell you which you got. For exact control, open the tile
+and right-click the size you want in the right-hand panel.
+
+**This is hooked at the UI, not the input system**, and that is a deliberate constraint rather than
+an implementation detail. While the menu is open, right-click has already been consumed by vanilla's
+`CursorButton2` in the UI cursor layer:
+
+```
+[Input][#4028]: Control Keyboard::G : Build Menu activated with state Start.
+[Input][#4061]: Consuming input Mouse::Right in layer #26:<Uninitialized>
+[Input][#4061]: Control Mouse::Right : CursorButton2 activated with state Start.
+```
+
+A layer-less context is dispatched *before* the UI's, so binding our queue action here would have
+taken the button away from the menu — and right-clicking a toolbar slot clears it (verified in game).
+Hooking `GScreen.TilePressed` / `SizeTilePressed` / `SubTilePressed` sidesteps the contest entirely:
+vanilla still gets its click, we read the same event afterwards, and the toolbar is untouched because
+its presses go through `OnToolbarTilePointerPressed`, a different path.
 
 ## Producing components
 
@@ -133,12 +183,62 @@ The mod enqueues the top-level component recipe and stops.
   found here is one the terminal would also accept — but whether the engine refuses a locked recipe
   at a lower layer is unconfirmed.
 
-`BuildPlannerWithdraw` appears in **Options → Controls → Building** and can be rebound; the mod
-respects a rebind rather than forcing N.
+## Rebinding
 
-Modelled on the SE1 scheme in `../notes/build-planner-ux-spec.md`, adapted: SE1 used middle-click,
-which is unusable here because vanilla already binds `Mouse::Middle` to three actions and an input is
-consumed by exactly one context per frame.
+All nine actions appear in **Options → Controls → Building**, named `Build Planner: …`, and each can
+be rebound on its own — to a plain key or to a chord, since the rebinding dialog composes modifiers
+(`InputControlComposer.KeyboardDefault`).
+
+**Verified in game 2026-08-22.** All eight keyboard actions were rebound onto `Mouse::Middle` and
+its chords, used for a full session, and survived a restart — the startup log read them back from the
+options file:
+
+```
+  bound BuildPlannerWithdraw to Mouse::Middle
+  bound BuildPlannerWithdrawKeep to Mouse::Middle+Keyboard::Control
+  bound BuildPlannerDiagnose to Mouse::Middle+Keyboard::Control+Keyboard::Shift+Keyboard::Alt
+```
+
+**This did not work before that date and the reason is worth keeping.** A customised binding is
+persisted *by the action's GUID*:
+
+```json
+{ "Action": "00000000-0000-0000-0000-000000000000",
+  "PrimaryControl": { "$Type": "VRage:Keen.VRage.Input.DigitalControl", "Input": "Mouse::Middle" } }
+```
+
+That is a real line from `%APPDATA%\SpaceEngineers2\AppData\EngineOptions\CustomizedControlsOptionsPart`
+after rebinding the old action. The action had been built with `new InputActionDefinition(...)`,
+which leaves `Guid` empty and never registers it with the `DefinitionManager` — so
+`ActionControlEntry.Action` could not resolve it on the way back in, returned a placeholder, and
+`ControlCustomizationEngineComponent.UpdateMappings` dropped the entry:
+
+```csharp
+if (builder.RemoveAction(action))   // false for the placeholder -> the rebinding is discarded
+```
+
+The binding menu therefore accepted the new key and the game kept using N.
+
+The fix is the missing half of the setup, not a workaround: each action is now built from an
+`InputActionDefinitionObjectBuilder` carrying a fixed GUID (`RuntimeDefinitionHelper.Create(...,
+keepBuilderGuid: true)`) and inserted into the definition set that already owns vanilla's input
+actions, so `TryGetDefinition` resolves it. Orphaned `00000000-…` entries left over from the old
+behaviour are removed from the options file on the next launch.
+
+### Middle-click is available after all
+
+Modelled on the SE1 scheme in `../notes/build-planner-ux-spec.md`. The defaults use `N` because
+vanilla binds plain `Mouse::Middle` to three actions — `ba689cc1` (ToolTertiary), `6a759ebb` and
+`9ad853aa` — and an input is consumed by exactly one context per frame.
+
+**That does not make middle-click unusable, only impolite by default.** Verified in game 2026-08-22:
+rebinding all eight keyboard actions onto `Mouse::Middle` and its chords works, restoring the SE1
+scheme exactly. Our withdraw context is layer-less and permanently active, and `DispatchActions`
+walks `_activeContexts` backwards, so it claims the button before vanilla's contexts see it.
+
+The cost is that vanilla's three middle-click actions are suppressed while *plain* middle-click is
+bound to a Build Planner action. The chorded variants cost nothing — no vanilla action uses
+CTRL/ALT/SHIFT + middle-click.
 
 ## Working
 
@@ -148,7 +248,7 @@ consumed by exactly one context per frame.
 - Deposit-all
 - **Production** at a conveyor-reachable assembler, with the engine cascading sub-components
 - Outcome reported on every path (withdrew / partial / nothing found / nothing queued / no target)
-- Rebindable key registered in the controls menu
+- Nine separately rebindable actions in the controls menu, chords included
 
 ## Verified in game
 
@@ -274,11 +374,11 @@ cd BuildPlanner.Tests
 dotnet test
 ```
 
-56 tests, covering the logic that is decidable without the game running:
+43 tests, covering the logic that is decidable without the game running:
 
 | Unit | Why it is tested |
 |---|---|
-| `Modifiers.Resolve(ctrl, alt)` | branch order decides what ALT+CTRL means |
+| `BuildPlannerActions.All` | a duplicate GUID, name or chord silently merges two controls |
 | `ComponentWithdrawal.Classify` | picks the message the player acts on |
 | `BuildPlannerQueue.Accumulate` | merge + x10 must apply to *every* occurrence |
 | `ComponentProduction.RunsNeeded` | rounding down leaves the player one component short |

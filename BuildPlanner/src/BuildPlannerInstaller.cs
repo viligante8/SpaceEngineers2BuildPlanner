@@ -1,10 +1,15 @@
 using System;
 using System.Reflection;
+using Avalonia.Input;
 using Keen.Game2.Client.Input;
 using Keen.VRage.Core.Plugins;
 using Keen.VRage.Input;
 using Keen.VRage.Input.EngineComponents;
 using MonoMod.RuntimeDetour;
+
+// The build-menu screen's type and its namespace are both called "GScreen", so the type needs an
+// alias to be nameable here.
+using GScreenView = Keen.Game2.Client.UI.TerminalScreen.GScreen.GScreen;
 
 namespace BuildPlanner;
 
@@ -48,6 +53,9 @@ internal sealed class BuildPlannerInstaller
     private static Hook? _setMappingHook;
     private static Hook? _integrityToolHook;
     private static Hook? _integrityToolCloseHook;
+    private static Hook? _tilePressedHook;
+    private static Hook? _sizeTilePressedHook;
+    private static Hook? _subTilePressedHook;
 
     internal void Install(PluginHost host)
     {
@@ -84,6 +92,88 @@ internal sealed class BuildPlannerInstaller
         Log.Write("  hook installed on ControlCustomizationEngineComponent.SetMapping");
 
         InstallIntegrityToolHook();
+        InstallBuildMenuHooks();
+    }
+
+    /// <summary>
+    /// Queueing from the build menu (G).
+    ///
+    /// These are Avalonia pointer handlers on the menu's own tiles, not input actions. That is
+    /// deliberate — while the menu is open the input system has already given right-click to
+    /// vanilla's CursorButton2, and taking it back would break right-click-to-clear on the toolbar.
+    /// See BlockMenuAccess for the trace that showed this.
+    /// </summary>
+    private void InstallBuildMenuHooks()
+    {
+        _tilePressedHook = HookGScreen("TilePressed", HookedTilePressed);
+        _sizeTilePressedHook = HookGScreen("SizeTilePressed", HookedSizeTilePressed);
+        _subTilePressedHook = HookGScreen("SubTilePressed", HookedSubTilePressed);
+    }
+
+    private static Hook? HookGScreen(string methodName, Delegate replacement)
+    {
+        var method = typeof(GScreenView).GetMethod(
+            methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+        if (method == null)
+        {
+            Log.Write($"  WARNING: GScreen.{methodName} not found; that build-menu path will not queue");
+            return null;
+        }
+
+        var hook = new Hook(method, replacement);
+        Log.Write($"  hook installed on GScreen.{methodName}");
+        return hook;
+    }
+
+    private delegate void OriginalTilePressed(
+        GScreenView self, object? sender, PointerPressedEventArgs e);
+
+    private static void HookedTilePressed(
+        OriginalTilePressed original, GScreenView self, object? sender, PointerPressedEventArgs e)
+    {
+        // Original first: it records the drag origin, and a right-click must not change how dragging
+        // behaves.
+        original(self, sender, e);
+
+        try
+        {
+            BlockMenuAccess.OnTilePressed(sender, e);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("queueing from a build-menu tile failed", ex);
+        }
+    }
+
+    private static void HookedSizeTilePressed(
+        OriginalTilePressed original, GScreenView self, object? sender, PointerPressedEventArgs e)
+    {
+        original(self, sender, e);
+
+        try
+        {
+            BlockMenuAccess.OnSizeTilePressed(sender, e);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("queueing from a build-menu size tile failed", ex);
+        }
+    }
+
+    private static void HookedSubTilePressed(
+        OriginalTilePressed original, GScreenView self, object? sender, PointerPressedEventArgs e)
+    {
+        original(self, sender, e);
+
+        try
+        {
+            BlockMenuAccess.OnSubTilePressed(sender, e);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("queueing from a build-menu sub-tile failed", ex);
+        }
     }
 
     /// <summary>
@@ -176,6 +266,7 @@ internal sealed class BuildPlannerInstaller
     {
         try
         {
+            BuildPlannerBinding.NoteCustomizationComponent(self);
             mapping = BuildPlannerBinding.InjectActions(mapping);
             BuildPlannerBinding.EnsureContextActive();
         }
@@ -185,7 +276,19 @@ internal sealed class BuildPlannerInstaller
         }
 
         original(self, mapping);
+
+        // After, never before: the purge removes entries from an ObservableList, and the resulting
+        // CollectionChanged makes the component rebuild its mapping from _baseMappings - which is
+        // still null until the original SetMapping has run.
+        if (!_purgedOrphans)
+        {
+            _purgedOrphans = true;
+            BuildPlannerBinding.PurgeOrphanedCustomizations(self);
+        }
     }
+
+    /// <summary>Orphaned customisations are cleaned once per run; see PurgeOrphanedCustomizations.</summary>
+    private static bool _purgedOrphans;
 
     private delegate void OriginalInit(InputGameComponent self);
 

@@ -10,6 +10,26 @@ a container, receive exactly the components you are missing.
 
 ## State
 
+**Every control is a separately rebindable action, verified in game (2026-08-22).**
+
+The nine chords used to be one action plus live modifier sampling, so only one line appeared in
+Options → Controls — and rebinding it did nothing, because a plugin-made `InputActionDefinition` has
+`Guid.Empty` and the customisation is persisted *by GUID*. Each action now has a fixed GUID and is
+registered with the `DefinitionManager`; the mechanism and the evidence are in
+`notes/build-planner-api.md` ("Custom input actions are keyed by GUID").
+
+Confirmed in one session: all nine actions dispatched on their own bindings, chords resolved against
+each other at 1-4 inputs, the orphaned `Guid.Empty` entry was purged, and **all eight keyboard
+actions were rebound onto `Mouse::Middle` + chords and survived a restart**. The SE1 middle-click
+scheme is therefore reachable by rebinding — see the README's "Middle-click is available after all"
+for the one side effect (vanilla's three plain-middle-click actions are suppressed).
+
+**New and verified: queueing from the build menu (G).** Right-click a block tile to queue it.
+Confirmed in game 2026-08-22: grid ('+') tiles resolve group -> kind -> block, kind tiles queue their
+first unlocked size, the message names the exact size (`queued Battery 0.5 m`), non-block tiles refuse
+out loud (`ToolTileModel 'Drill Mk 3'`), and **right-click still clears a toolbar slot** — the
+regression the UI-hook design exists to avoid. Only the right-hand panel's size tile is unexercised.
+
 **Everything in the control table is working, and the conveyor fix is confirmed (2026-08-22).**
 
 Produce enqueues at the assembler, the engine's sub-component cascade fires on its own, and reach is
@@ -55,6 +75,33 @@ assembler queue (`would not accept ...`, logged, then the next converter is trie
 
 If it looks like nothing happened, press **SHIFT+ALT+CTRL+N** — the dump now lists every converter
 it can reach, whether each is crafting, and how deep its queue is.
+
+**Test 4 — rebinding.** Options → Controls → Building lists nine `Build Planner: …` actions. Rebind
+one (say Withdraw to `M`), close the menu, and use it. Expect the new key to work and the old one to
+do nothing. Restart and check it survived; the startup log prints the binding each action actually
+has:
+
+```
+  bound BuildPlannerWithdraw to Keyboard::M
+```
+
+The log should also show, once, on the first launch after this change:
+
+```
+  removed an orphaned control customisation (no action GUID)
+```
+
+— that is the `"Action": "00000000-0000-0000-0000-000000000000"` entry the old bug wrote into
+`%APPDATA%\SpaceEngineers2\AppData\EngineOptions\CustomizedControlsOptionsPart`.
+
+**Test 5 — the build menu.** Open G and right-click: a grid tile (the '+' kind), a size tile in the
+right-hand panel, and a tool tile. Expect `queued <name with size> (N total)` for the first two and
+`only blocks can be queued from the build menu` for the third. Then **right-click a toolbar slot and
+confirm it still clears** — the mod hooks the menu's UI handlers precisely so it never takes that
+button, and that is the regression to watch for.
+
+If one right-click ever queues two blocks, the press de-duplication in `BlockMenuAccess` has failed;
+the panel attaches its handler twice (see `notes/build-planner-api.md`).
 
 ## Read before touching plugin code
 
@@ -120,7 +167,7 @@ cd BuildPlanner
 dotnet build -p:GameDir="F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2"
 
 cd BuildPlanner.Tests
-dotnet test          # 56 tests, pure logic only
+dotnet test          # 43 tests, pure logic only
 ```
 
 **The game must be closed to build** — it holds the DLL open (MSB3021 otherwise). The workflow that

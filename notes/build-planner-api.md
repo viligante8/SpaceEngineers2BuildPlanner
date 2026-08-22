@@ -519,3 +519,202 @@ delegation — the same scope, reached a different way.
 was found first, was plausible, produced working withdrawals in every test on a normally-plumbed
 base, and was wrong. The first file found is rarely the whole story; the check that would have caught
 it is "what does the engine itself call to do this?", which points at the conveyor graph every time.
+
+## Custom input actions are keyed by GUID, and must be registered (2026-08-22)
+
+A plugin action that is not in the `DefinitionManager` **cannot be rebound**. The controls menu
+accepts the new key, writes it to disk, and the game goes on using the old one. This was the reported
+bug: "our N hotkey is in the settings -> controls menu. I tried remapping it and nothing changed."
+
+### Evidence
+
+`%APPDATA%\SpaceEngineers2\AppData\EngineOptions\CustomizedControlsOptionsPart`, after a rebind of
+the old plugin action:
+
+```json
+{ "Action": "00000000-0000-0000-0000-000000000000",
+  "PrimaryControl": { "$Type": "VRage:Keen.VRage.Input.DigitalControl", "Input": "Mouse::Middle" },
+  "SecondaryControl": null }
+```
+
+### The mechanism
+
+`CustomizedControlsOptionsPart.ActionControlEntry` (VRage.Input.dll) stores the action as a GUID:
+
+```csharp
+[Serialize(Name = "Action")] private Guid _actionGuid;
+public InputActionDefinition Action {
+    get {
+        if (Singleton<DefinitionManager>.Instance.TryGetDefinition(_actionGuid, out InputActionDefinition d))
+            return d;
+        Assert.Fail("Failed to locate definition with Guid {_actionGuid}", ...);
+        return _placeholder;                       // a throwaway runtime definition
+    }
+    private set => _actionGuid = value.Guid;
+}
+```
+
+and `ControlCustomizationEngineComponent.UpdateMappings` applies customisations only to actions the
+base mapping already contains:
+
+```csharp
+ActionControlMapping.Builder builder = _baseMappings.ToBuilder();
+foreach (var (action, primary, secondary) in _customizedControls.CustomizedControls) {
+    if (builder.RemoveAction(action)) {          // placeholder -> false -> entry silently dropped
+        if (primary != null) builder.AddControl(action, primary);
+        if (secondary != null) builder.AddControl(action, secondary);
+    }
+}
+_actionProcessor.SetMapping(builder.MoveToMapping());
+```
+
+`new InputActionDefinition(displayName, type)` leaves `Definition.Guid` as `Guid.Empty` — the
+constructor sets only `DisplayName`, `Name`, `ExpectedInputType`, `Reactivate`. So every rebind of a
+plugin action was written as `Guid.Empty` and thrown away on the way back.
+
+### The fix
+
+Build the definition from an object builder and keep the GUID:
+
+```csharp
+var builder = new InputActionDefinitionObjectBuilder {
+    Guid = ourGuid, Name = StringId.Get("BuildPlannerWithdraw"),
+    DisplayName = LocKey.FromString("Build Planner: Withdraw"),
+    ExpectedInputType = InputType.Digital, Category = buildingControls,
+};
+var action = RuntimeDefinitionHelper.Create<InputActionDefinition>(builder, context: null, keepBuilderGuid: true);
+```
+
+`RuntimeDefinitionHelper.Create` runs the engine's own `Init`/`PostInit` and asserts
+`instance.Guid == builder.Guid`. Without `keepBuilderGuid: true` it *clears* the builder's GUID —
+which is why the placeholder in `CustomizedControlsOptionsPart` has `Guid.Empty`.
+
+Then make it resolvable. There is no public registration API — `PushDefinitionSetAsync` wants an
+`IDefinitionObjectBuilderLocator` and a full async load — but the lookup is a plain dictionary:
+
+```
+DefinitionManager.TryGetDefinition -> TryGetAnyDefinitionInternal -> DefinitionSet.TryGetAnyDefinition
+DefinitionSet.TryGetAnyDefinition == _definitionsById.TryGetValue(id, out definition)   // verified in IL
+```
+
+so the definitions are inserted into `DefinitionSet._definitionsById` of the set that already holds
+vanilla's input actions (located by looking up a known action GUID rather than by set name). That
+gives them exactly that set's lifetime.
+
+### Chords are real bindings, not modifier sampling
+
+`DigitalCompositeInputControl(mainInput, modifiers)` is how vanilla expresses ALT+F4 and SHIFT+F5 in
+`Assets/MainMenuData/Input/ActionControlMapping.def`. `InputControlComposer.KeyboardDefault`
+(valid modifiers: Alt, Control, Shift) builds the same thing at runtime —
+`Compose(action, mainInput, modifiers)` — and is what the rebinding dialog itself uses
+(`InputCompositionDialogViewModel.ProcessInput` → `TryComposeFromActive`), so chord *rebinding* works
+out of the box.
+
+Disambiguation is automatic: `DisambiguatingControlActivationFilter.StartFrame` records, per input,
+the largest number of inputs any candidate control has, and `FilterOnControl` cancels a control when
+`_maxInputs[input] > control.Inputs.Length` ("Discard candidate control …, too few inputs"). So plain
+N is cancelled in the frame where SHIFT+N is active.
+
+### Two mapping entries may share an input
+
+`ActionControlMapping.Builder.AddControl` throws only on the *same control instance*: "Each action
+must be bound to a unique control instance, event if those instances share the same inputs." Two
+distinct `DigitalControl(Mouse::Right)` objects bound to two actions are legal — they then compete
+in the filter, and `DispatchActions` walks `_activeContexts` **backwards**, so a layer-less context
+(appended past the named layers) is processed before vanilla's and takes the input.
+
+### Where the controls menu comes from
+
+`ControlCustomizationViewModel.SetMapping` groups `mapping.ControlsPerAction` by
+`Definition.Category`, dropping null and the hidden category, ordering groups by
+`ActionCategoryConfiguration.OrderedControlCategories` and actions by `Definition.Name.String`.
+`ControlsViewModel` (Game2.Client) snapshots `ActionsPerCategory` in its constructor. Publishing
+through `ControlCustomizationEngineComponent.SetMapping` (rather than straight into the processor)
+is therefore what makes a late-arriving action appear in the menu — it rebuilds that view model and
+re-applies customisations in one go.
+
+### Confirmed in game (2026-08-22)
+
+One session exercised the whole path. All nine actions dispatched on their own bindings; chords
+resolved correctly against each other at one, two, three and four inputs; the orphaned `Guid.Empty`
+entry was purged once and never reappeared.
+
+Then all eight keyboard actions were rebound onto `Mouse::Middle` and its chords and **survived a
+restart** — the plugin read them back out of the mapping at startup:
+
+```
+  bound BuildPlannerWithdraw to Mouse::Middle
+  bound BuildPlannerWithdrawKeep to Mouse::Middle+Keyboard::Control
+  bound BuildPlannerDiagnose to Mouse::Middle+Keyboard::Control+Keyboard::Shift+Keyboard::Alt
+```
+
+The options file holds real GUIDs and `CompositeInputControl\`1<System.Boolean>` payloads for the
+chords, which is the round trip that used to fail.
+
+**Consequence worth knowing:** plain `Mouse::Middle` *is* usable, contradicting an earlier note in
+the README. Vanilla binds it to three actions (`ba689cc1` ToolTertiary, `6a759ebb`, `9ad853aa`), but
+a layer-less context is dispatched before them (`DispatchActions` walks `_activeContexts` backwards),
+so the mod wins the button — at the cost of suppressing those three while a Build Planner action sits
+on plain middle-click. Chorded middle-click costs nothing, as no vanilla action uses a modifier with
+that button. The shipped defaults stay on `N` so the mod does not take the button uninvited.
+
+## The build menu's tile hierarchy, and how to act on a right-click (2026-08-22)
+
+Queueing a block from the build menu (G) cannot be done through the input system, and the tiles are
+not what they look like. Both facts were settled in game rather than by reading.
+
+### Right-click is already spoken for while the menu is open
+
+The engine's own trace (`ActionProcessorDebugObject.DetailedInputLog`) during a menu right-click:
+
+```
+[Input][#4028]: Control Keyboard::G : Build Menu activated with state Start.
+[Input][#4061]: Consuming input Mouse::Right in layer #26:<Uninitialized>
+[Input][#4061]: Control Mouse::Right : CursorButton2 activated with state Start.
+```
+
+An input is consumed by exactly one context per frame and a layer-less context is dispatched first,
+so activating a mod context here **takes right-click away from the menu**. That is not acceptable:
+right-clicking a toolbar slot clears it (confirmed in game by the user).
+
+The way through is to hook the menu's own Avalonia handlers on `GScreen`
+(`Keen.Game2.Client.UI.TerminalScreen.GScreen.GScreen` — the type and its namespace share a name, so
+C# needs an alias):
+
+| Handler | Fires for |
+|---|---|
+| `TilePressed(object?, PointerPressedEventArgs)` | catalogue tiles in the central panel |
+| `SizeTilePressed` | size tiles in the right-hand detail panel |
+| `SubTilePressed` | kind sub-tiles in the detail panel |
+| `OnToolbarTilePointerPressed` | **the toolbar** — a separate path, so it is untouched |
+
+Run the original first (it records the drag origin), then read `e.GetCurrentPoint(null)
+.Properties.IsRightButtonPressed` and `(sender as IDataContextProvider)?.DataContext as TileModel`.
+
+`TilesPanel` attaches its handler to the tile control *and* re-adds it to every prepared container
+(`OnContainerPrepared`), so one press can reach the handler twice. Vanilla does not care — its
+handler only stores a point — but anything with a side effect must de-duplicate on
+`PointerEventArgs.Timestamp`.
+
+### Three tile types, only one of which is a block
+
+Observed live, which corrected a wrong first implementation that refused the grid's own tiles:
+
+```
+menu right-click on BlockGroupTileModel 'Battery' — not a block
+menu right-click on BlockKindTileModel 'Battery' with 3 variant(s):
+    variant: 'Battery 0.5 m' unlocked=True
+    variant: 'Battery 1.5 m' unlocked=True
+    variant: 'Battery 2.5 m' unlocked=True
+```
+
+- `BlockGroupTileModel.BlockKinds` → `ImmutableArray<BlockKindTileModel>` — the grid tiles ('+').
+- `BlockKindTileModel.Blocks` → `ImmutableArray<BlockTileModel>` — the grid sizes.
+- `BlockTileModel.Block` → `EntityCompositeDefinition` (**internal**, so reflection), and
+  `EntityObjectBuilderFunctions.TryGetDefinition<CubeBlockComponent, CubeBlockDefinition>(composite)`
+  pulls out the definition, exactly as `BlockTileModel`'s constructor does.
+- `BlockSizeModel.Block` → the concrete `BlockTileModel` for one size.
+
+**Naming trap:** every grid size shares one `CubeBlockDefinition.UIData.Name` — all three batteries
+are "Battery". The per-size name is on the tile (`LocalizableBlockTypeDisplayName`), so any message
+about which variant was queued has to come from the tile, not the definition.

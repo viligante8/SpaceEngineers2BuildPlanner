@@ -10,15 +10,18 @@ using Keen.VRage.DCS.Components;
 namespace BuildPlanner;
 
 /// <summary>
-/// Drives the Build Planner: turns middle-click (+ modifiers) into queue and withdrawal operations.
+/// Drives the Build Planner: turns input actions into queue, withdrawal and production operations.
 ///
-/// Reproduces the SE1 Build Planner control scheme documented in notes/build-planner-ux-spec.md:
-///   middle-click              withdraw queued components, clear queue
-///   CTRL + middle-click       withdraw, keep queue
-///   ALT + CTRL + middle-click withdraw x10, keep queue
-///   ALT + middle-click        deposit inventory
-///   SHIFT + middle-click      produce queued components at a connected assembler
-///   SHIFT + CTRL + middle-click produce x10
+/// Reproduces the SE1 Build Planner control scheme documented in notes/build-planner-ux-spec.md,
+/// with the SE1 chords kept as the default bindings (see <see cref="BuildPlannerActions.All"/>):
+///   N                 withdraw queued components, clear queue
+///   CTRL + N          withdraw, keep queue
+///   ALT + CTRL + N    withdraw x10, keep queue
+///   ALT + N           deposit inventory
+///   SHIFT + N         produce queued components at a connected assembler
+///   SHIFT + CTRL + N  produce x10
+///
+/// Every one of those is a separate action, so the player can rebind any of them individually.
 ///
 /// Queueing stays explicit, as in SE1: blocks never enter the queue on their own.
 /// </summary>
@@ -41,15 +44,24 @@ internal sealed class BuildPlannerController
 
     internal BuildPlannerQueue Queue => _queue;
 
-    /// <summary>Add a block's requirements to the queue. Bound to the queueing input.</summary>
-    internal void QueueBlock(CubeBlockDefinition? block, CubeBlockComponent? built = null)
+    /// <summary>
+    /// Add a block's requirements to the queue. Bound to the queueing input, and used by the build
+    /// menu.
+    /// </summary>
+    /// <param name="displayName">
+    /// What to call the block in the notification. Every grid size of a block shares one
+    /// <c>UIData.Name</c> — both drills are "Drill" — so callers that know the precise variant (the
+    /// build menu does) pass its name, and the player can see which size was queued.
+    /// </param>
+    internal void QueueBlock(
+        CubeBlockDefinition? block, CubeBlockComponent? built = null, string? displayName = null)
     {
         if (block == null) return;
 
         // Queue what is still OUTSTANDING, not the whole recipe. A partly welded block needs the
         // remainder; asking for a full block's worth hands the player components they already put in.
         _queue.Add(block, BlockRequirements.Remaining(built, block));
-        _notifier.QueuedBlock(block.UIData?.Name.ToString() ?? "block", _queue.Count);
+        _notifier.QueuedBlock(displayName ?? block.UIData?.Name.ToString() ?? "block", _queue.Count);
         EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
@@ -82,63 +94,58 @@ internal sealed class BuildPlannerController
     /// sets AlignedBlock to a CubeBlockPlacementTarget for a real block and a
     /// ProjectionBlockPlacementTarget for a projection, and both expose Definition and BuildProgress.
     /// </summary>
-    internal void OnSecondaryAction()
+    private void QueueAimedBlock()
+    {
+        BuildPlannerBinding.LogContextState("on the queue key:");
+
+        // Primary source: the blocks the game's own tooltip is showing. This is the same data
+        // that drives the "you need N x Steel Plate" panel, so what gets queued is by definition
+        // what the player is looking at. See IntegrityToolAccess for why the two earlier routes
+        // (block placer, interacted entity) were both wrong.
+        var targeted = IntegrityToolAccess.GetTargetedBlocks();
+        if (targeted.Count > 0)
+        {
+            foreach (var (built, definition) in targeted) QueueBlock(definition, built);
+            return;
+        }
+
+        // No fallback. The integrity tool is the ONLY source.
+        //
+        // A block-placer fallback used to sit here. It never resolved in welder mode - every
+        // right-click logged "no BlockPlacerEntityComponent on character" - but it resolves
+        // perfectly in block PLACEMENT mode, because that is when a block placer exists and has
+        // an aligned block. So the one situation it worked in was the one situation we must not
+        // queue in, and it defeated the placement-mode guard by running after it:
+        //
+        //   Build Planner: no build tool active (equip a welder and aim at a block)   <- guard OK
+        //   notify: Build Planner: queued Gearforge (1 total)                          <- fallback
+        //
+        // Observed in game 2026-08-22. Queueing requires an active welder, full stop.
+        _notifier.NothingToQueue();
+    }
+
+    /// <summary>
+    /// Run one Build Planner operation. Every input action lands here, carrying what it means.
+    ///
+    /// The operation is decided by which action fired, not by reading the keyboard: each action is
+    /// separately bound and separately rebindable, so the chords in the defaults are just defaults.
+    /// </summary>
+    internal void Perform(PlannerAction action)
     {
         try
         {
-            BuildPlannerBinding.LogContextState("on right-click:");
-
             if (BuildPlannerBinding.IsGamePaused())
             {
                 // No notification: the HUD is behind the menu and the player did not mean to act.
-                Log.Debug("  debug: game is paused; ignoring right-click");
+                Log.Debug($"  debug: game is paused; ignoring {action}");
                 return;
             }
 
-            // Primary source: the blocks the game's own tooltip is showing. This is the same data
-            // that drives the "you need N x Steel Plate" panel, so what gets queued is by definition
-            // what the player is looking at. See IntegrityToolAccess for why the two earlier routes
-            // (block placer, interacted entity) were both wrong.
-            var targeted = IntegrityToolAccess.GetTargetedBlocks();
-            if (targeted.Count > 0)
+            switch (action)
             {
-                foreach (var (built, definition) in targeted) QueueBlock(definition, built);
-                return;
-            }
-
-            // No fallback. The integrity tool is the ONLY source.
-            //
-            // A block-placer fallback used to sit here. It never resolved in welder mode - every
-            // right-click logged "no BlockPlacerEntityComponent on character" - but it resolves
-            // perfectly in block PLACEMENT mode, because that is when a block placer exists and has
-            // an aligned block. So the one situation it worked in was the one situation we must not
-            // queue in, and it defeated the placement-mode guard by running after it:
-            //
-            //   Build Planner: no build tool active (equip a welder and aim at a block)   <- guard OK
-            //   notify: Build Planner: queued Gearforge (1 total)                          <- fallback
-            //
-            // Observed in game 2026-08-22. Queueing requires an active welder, full stop.
-            _notifier.NothingToQueue();
-        }
-        catch (Exception ex)
-        {
-            Log.Error("secondary action failed", ex);
-        }
-    }
-
-    /// <summary>Handle a middle-click, dispatching on the modifiers held right now.</summary>
-    internal void OnTertiaryAction()
-    {
-        try
-        {
-            if (BuildPlannerBinding.IsGamePaused())
-            {
-                Log.Debug("  debug: game is paused; ignoring the withdraw key");
-                return;
-            }
-
-            switch (Modifiers.Resolve())
-            {
+                case PlannerAction.Queue:
+                    QueueAimedBlock();
+                    break;
                 case PlannerAction.Withdraw:
                     Withdraw(multiplier: 1, keepQueue: false);
                     break;
@@ -164,11 +171,15 @@ internal sealed class BuildPlannerController
                     Diagnostics.DumpAll(_queue, _clientSession(), _session());
                     _notifier.Info("Build Planner: state written to the log");
                     break;
+                default:
+                    // Never silent: an unhandled action would otherwise look like a dead keybind.
+                    Log.Write($"  WARNING: no handler for {action}");
+                    break;
             }
         }
         catch (Exception ex)
         {
-            Log.Error("tertiary action failed", ex);
+            Log.Error($"{action} failed", ex);
         }
     }
 
