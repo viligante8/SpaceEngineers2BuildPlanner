@@ -5,8 +5,6 @@ using Keen.Game2.Simulation.GameSystems.Ownership;
 using Keen.Game2.Simulation.GameSystems.Player;
 using Keen.Game2.Client.GameSystems.PlayerControl;
 using Keen.Game2.Simulation.GameSystems.BuildPlanners;
-using Keen.Game2.Simulation.GameSystems.Ownership;
-using Keen.Game2.Simulation.GameSystems.Player;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks;
 using Keen.VRage.Core.Game.Systems;
 

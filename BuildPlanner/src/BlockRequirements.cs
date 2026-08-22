@@ -53,21 +53,7 @@ internal static class BlockRequirements
             var total = Read(buffer => block.GetTotalItems(buffer, false), capacity);
             var stored = Read(buffer => block.GetStoredItems(buffer, false), capacity);
 
-            var remaining = new List<ItemAmount>(total.Count);
-
-            foreach (var want in total)
-            {
-                if (want.Item == null) continue;
-
-                var have = AmountOf(stored, want.Item);
-                var outstanding = want.Amount - have;
-
-                // Skip anything already satisfied. A negative can only mean the block holds more of
-                // an item than the finished block needs; either way nothing is outstanding.
-                if (outstanding <= 0) continue;
-
-                remaining.Add(new ItemAmount(want.Item, outstanding));
-            }
+            var remaining = Subtract(total, stored);
 
             // Full accounting, always logged while this is under investigation.
             //
@@ -96,6 +82,70 @@ internal static class BlockRequirements
             Log.Error($"computing the remainder for '{definition.UIData?.Name}' failed; using the full recipe", ex);
             return FromDefinition(definition);
         }
+    }
+
+    /// <summary>
+    /// Outstanding = total minus stored, aggregated per item type.
+    /// </summary>
+    /// <remarks>
+    /// **The same item type can appear more than once in these lists, and that is the whole reason
+    /// this method exists.** The engine's list is ordered by integrity ("Index 0 = Lowest
+    /// Integrity"), so a block whose optional portion uses a material it already used critically
+    /// lists it twice. A Gearforge reads:
+    ///
+    ///     16 x Steel Plate, 8 x Motor, 2 x Electronic Parts, 2 x Metal Grid, 12 x Steel Plate
+    ///
+    /// The earlier implementation matched each total against the *first* stored entry of that type,
+    /// so the trailing "12 x Steel Plate" was compared against the 16 already stored, went negative,
+    /// and was discarded. The visible symptom was that a block could only ever be topped up to its
+    /// functional threshold - the optional remainder was silently cancelled out every time.
+    ///
+    /// Summing per type on both sides before subtracting is correct regardless of ordering or
+    /// duplication.
+    /// </remarks>
+    internal static List<ItemAmount> Subtract(List<ItemAmount> total, List<ItemAmount> stored)
+    {
+        var remaining = SubtractAggregated(
+            Pairs(total), Pairs(stored));
+
+        var result = new List<ItemAmount>(remaining.Count);
+        foreach (var (item, amount) in remaining) result.Add(new ItemAmount(item, amount));
+        return result;
+    }
+
+    private static IEnumerable<(ItemDefinition, Keen.VRage.Library.Mathematics.FixedPoint)> Pairs(
+        List<ItemAmount> items)
+    {
+        foreach (var item in items)
+            if (item.Item != null)
+                yield return (item.Item, item.Amount);
+    }
+
+    /// <summary>
+    /// The aggregation itself, generic purely so it can be unit-tested — ItemDefinition cannot be
+    /// constructed outside a loaded game, but this arithmetic is where the bug was.
+    /// </summary>
+    internal static List<(TKey Key, Keen.VRage.Library.Mathematics.FixedPoint Amount)> SubtractAggregated<TKey>(
+        IEnumerable<(TKey Key, Keen.VRage.Library.Mathematics.FixedPoint Amount)> total,
+        IEnumerable<(TKey Key, Keen.VRage.Library.Mathematics.FixedPoint Amount)> stored)
+        where TKey : notnull
+    {
+        var wanted = new Dictionary<TKey, Keen.VRage.Library.Mathematics.FixedPoint>();
+
+        // Sum, never overwrite: the same key legitimately appears several times.
+        foreach (var (key, amount) in total)
+            wanted[key] = wanted.TryGetValue(key, out var w) ? w + amount : amount;
+
+        foreach (var (key, amount) in stored)
+            if (wanted.TryGetValue(key, out var w))
+                wanted[key] = w - amount;
+
+        var remaining = new List<(TKey, Keen.VRage.Library.Mathematics.FixedPoint)>(wanted.Count);
+        foreach (var entry in wanted)
+            if (entry.Value > 0)
+                remaining.Add((entry.Key, entry.Value));
+
+        return remaining;
     }
 
     /// <summary>Log an item list compactly. Temporary, for the remainder investigation.</summary>
@@ -155,13 +205,4 @@ internal static class BlockRequirements
         }
     }
 
-    private static Keen.VRage.Library.Mathematics.FixedPoint AmountOf(
-        List<ItemAmount> items, ItemDefinition item)
-    {
-        foreach (var candidate in items)
-            if (ReferenceEquals(candidate.Item, item))
-                return candidate.Amount;
-
-        return 0;
-    }
 }
