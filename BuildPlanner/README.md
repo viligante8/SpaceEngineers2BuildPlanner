@@ -519,6 +519,24 @@ dotnet build -p:GameDir="F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2"
 **The game must be closed** — it holds `bin\BuildPlanner.dll` open, and the build fails at the copy
 step with MSB3021 while it runs.
 
+## Releasing
+
+```
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+builds, tests, packages and publishes a GitHub release. A local zip without GitHub:
+
+```powershell
+.\scripts\package.ps1 -Version 1.0.0
+```
+
+That one works with the game open — it builds through a temporary directory rather than `bin\`.
+
+The release job needs a **self-hosted** runner, because the plugin compiles against Keen's shipped
+assemblies and no GitHub-hosted runner has the game. Setup, and what the artifact does and does not
+contain, are in `../RELEASING.md`.
+
 ## Background
 
 - `../notes/client-server-split.md` — the two-session architecture. **Read this first.**

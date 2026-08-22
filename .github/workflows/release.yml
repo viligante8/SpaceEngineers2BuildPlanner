@@ -1,0 +1,93 @@
+name: Release
+
+# Publishes a zip to a GitHub release when a version tag is pushed.
+#
+#     git tag v1.0.0 && git push origin v1.0.0
+#
+# WHY THIS NEEDS A SELF-HOSTED RUNNER
+# -----------------------------------
+# The plugin compiles against the shipped Space Engineers 2 assemblies
+# (Game2.Client.dll, VRage.*.dll and friends, referenced from $(GameDir)). Those are Keen's
+# proprietary binaries: they are not redistributable, so they are not in this repository, and no
+# GitHub-hosted runner has them. `dotnet build` on windows-latest cannot resolve a single game
+# reference and the job fails immediately.
+#
+# So the runner has to be a machine with Space Engineers 2 installed. See RELEASING.md for setup.
+#
+# The published zip contains no game assemblies - every game reference is <Private>false</Private>,
+# and scripts/package.ps1 fails the build if one ever leaks in.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build (e.g. 1.0.0). Publishes a draft release."
+        required: true
+        type: string
+
+permissions:
+  contents: write # creating the release
+
+jobs:
+  release:
+    runs-on: [self-hosted, windows, se2]
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/*') {
+            $version = $env:GITHUB_REF -replace '^refs/tags/v?', ''
+          } else {
+            $version = '${{ inputs.version }}' -replace '^v', ''
+          }
+          if (-not $version) { throw 'Could not determine a version to build.' }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building $version"
+
+      # Runs the unit tests, publishes, refuses to package if a game assembly leaked in,
+      # and writes dist\BuildPlanner-<version>.zip.
+      - name: Build and package
+        id: package
+        shell: pwsh
+        env:
+          # Set this as a repository variable if the game lives somewhere else on the runner.
+          SE2_GAME_DIR: ${{ vars.SE2_GAME_DIR }}
+        run: ./scripts/package.ps1 -Version ${{ steps.version.outputs.version }}
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+          name: Build Planner ${{ steps.version.outputs.version }}
+          files: ${{ steps.package.outputs.zip }}
+          # A manual run is for testing the pipeline, so it should not announce itself as a release.
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          body: |
+            Space Engineers 2 **Build Planner** — queue blocks, pull exactly the components you are missing.
+
+            ### Install
+
+            This is a **plugin**, not a Workshop mod.
+
+            1. Extract the zip somewhere permanent, outside the game directory.
+            2. Steam → Space Engineers 2 → Properties → Launch Options:
+               ```
+               -plugins:C:\path\to\BuildPlanner\BuildPlanner.dll
+               ```
+            3. Launch, and check for `BuildPlanner ready.` in
+               `%APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log`.
+
+            Full controls and troubleshooting are in `INSTALL.txt` inside the zip.
+
+            > Built against Space Engineers 2 — this plugin patches game methods at runtime, so a
+            > game update may break it. Check the log for a hook that failed to install.

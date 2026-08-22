@@ -1,0 +1,78 @@
+Space Engineers 2 - Build Planner
+=================================
+
+Queue the blocks you intend to build, then pull exactly the components you are
+missing from a nearby container. The SE1 Build Planner workflow, for SE2.
+
+This is a PLUGIN, not a data mod. It is not installed through the Workshop and
+it does not appear in the in-game mod list.
+
+
+INSTALL
+-------
+
+1. Extract this whole folder somewhere permanent - NOT inside the game's own
+   directory, or a game update will delete it. For example:
+
+       C:\SE2Mods\BuildPlanner\
+
+   Keep all the files together. BuildPlanner.dll needs the MonoMod and
+   Mono.Cecil DLLs beside it.
+
+2. In Steam, right-click Space Engineers 2 -> Properties -> General ->
+   Launch Options, and add:
+
+       -plugins:C:\SE2Mods\BuildPlanner\BuildPlanner.dll
+
+   Use the real path to BuildPlanner.dll. If it contains spaces, wrap the whole
+   option in quotes:
+
+       "-plugins:C:\My Mods\BuildPlanner\BuildPlanner.dll"
+
+3. Start the game. To confirm it loaded, check the log (see below) for:
+
+       BuildPlanner ready.
+
+
+CONTROLS
+--------
+
+  Right-click a block with a welder out .... queue what it still needs
+  Right-click a tile in the build menu (G).. queue that block
+  N ....................................... withdraw queued components
+  CTRL + N ................................ withdraw, keep the queue
+  ALT + CTRL + N .......................... withdraw x10, keep the queue
+  ALT + N ................................. deposit your inventory
+  SHIFT + N ............................... produce queued components
+  SHIFT + CTRL + N ........................ produce x10
+  SHIFT + ALT + N ......................... clear the queue
+
+Every one of these is rebindable in Options -> Controls -> Building, listed as
+"Build Planner: ...".
+
+Open a terminal to see the queue, bottom right. Left-click a block's icon to
+produce just that block; right-click it to remove it from the queue.
+
+
+LOG
+---
+
+  %APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log
+
+Include this file when reporting a problem - it records every action and the
+reason behind every refusal. Logging is verbose by default; to quieten it,
+create an empty file named "quiet" next to the log.
+
+
+UNINSTALL
+---------
+
+Remove the -plugins: launch option and delete the folder.
+
+
+NOTES
+-----
+
+This plugin patches game methods at runtime, so a Space Engineers 2 update can
+break it. If it stops working after an update, check the log for a line saying
+a hook could not be installed, and look for a newer release.
