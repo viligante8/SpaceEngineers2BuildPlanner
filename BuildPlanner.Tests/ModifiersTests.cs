@@ -50,25 +50,47 @@ public class ModifiersTests
         Assert.NotEqual(Modifiers.Resolve(ctrl: false, alt: true), both);
     }
 
+    [Fact]
+    public void Shift_ClearsTheQueue()
+    {
+        Assert.Equal(PlannerAction.ClearQueue, Modifiers.Resolve(ctrl: false, alt: false, shift: true));
+    }
+
+    [Fact]
+    public void ShiftCtrl_Diagnoses()
+    {
+        Assert.Equal(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: true, alt: false, shift: true));
+    }
+
     /// <summary>
-    /// SHIFT dumps diagnostics and must never fall through to a withdrawal. Before this existed,
-    /// Resolve ignored SHIFT entirely, so SHIFT+N silently performed a plain withdraw.
+    /// Neither SHIFT action may fall through to a withdrawal or a deposit. Before SHIFT was handled,
+    /// Resolve ignored it entirely and SHIFT+N silently performed a plain withdraw - the exact class
+    /// of silent wrong behaviour this feature cannot afford, since withdrawals move real items.
     /// </summary>
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
     [InlineData(true, true)]
-    public void Shift_AlwaysDiagnoses_RegardlessOfOtherModifiers(bool ctrl, bool alt)
+    public void Shift_NeverWithdrawsOrDeposits(bool ctrl, bool alt)
     {
-        Assert.Equal(PlannerAction.Diagnose, Modifiers.Resolve(ctrl, alt, shift: true));
+        var action = Modifiers.Resolve(ctrl, alt, shift: true);
+
+        Assert.NotEqual(PlannerAction.Withdraw, action);
+        Assert.NotEqual(PlannerAction.WithdrawKeepQueue, action);
+        Assert.NotEqual(PlannerAction.WithdrawTenKeepQueue, action);
+        Assert.NotEqual(PlannerAction.Deposit, action);
     }
 
     [Fact]
-    public void WithoutShift_NeverDiagnoses()
+    public void WithoutShift_NeverClearsOrDiagnoses()
     {
-        Assert.NotEqual(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: false, alt: false, shift: false));
-        Assert.NotEqual(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: true, alt: true, shift: false));
+        foreach (var (ctrl, alt) in new[] { (false, false), (true, false), (false, true), (true, true) })
+        {
+            var action = Modifiers.Resolve(ctrl, alt, shift: false);
+            Assert.NotEqual(PlannerAction.Diagnose, action);
+            Assert.NotEqual(PlannerAction.ClearQueue, action);
+        }
     }
 
     /// <summary>Every modifier combination maps to exactly one action - no combination is unhandled.</summary>

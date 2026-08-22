@@ -53,8 +53,17 @@ internal sealed class BuildPlannerController
 
     internal void ClearQueue()
     {
+        // Report the no-op case distinctly: "queue cleared" when nothing was queued reads as though
+        // something was discarded, and the player cannot see the queue to know otherwise.
+        if (_queue.Count == 0)
+        {
+            _notifier.NothingQueued();
+            return;
+        }
+
+        var cleared = _queue.Count;
         _queue.Clear();
-        _notifier.QueueCleared();
+        _notifier.QueueCleared(cleared);
         EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
@@ -126,6 +135,9 @@ internal sealed class BuildPlannerController
                     break;
                 case PlannerAction.Deposit:
                     Deposit();
+                    break;
+                case PlannerAction.ClearQueue:
+                    ClearQueue();
                     break;
                 case PlannerAction.Diagnose:
                     Diagnostics.DumpAll(_queue, _clientSession(), _session());

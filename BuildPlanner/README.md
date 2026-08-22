@@ -56,13 +56,21 @@ BuildPlanner ready.
 
 ## Controls
 
-| Input | Action |
-|---|---|
-| **Right-click** an unfinished block | Queue its missing components |
-| **N** | Withdraw queued components, clear the queue |
-| **CTRL + N** | Withdraw, **keep** the queue (repeat building) |
-| **ALT + CTRL + N** | Withdraw **×10**, keep the queue |
-| **ALT + N** | Deposit your inventory into the target |
+| Input | Action | Verified in game |
+|---|---|---|
+| **Right-click** an unfinished block (welder equipped) | Queue the components it still needs | yes |
+| **N** | Withdraw queued components, clear the queue | yes |
+| **CTRL + N** | Withdraw, **keep** the queue (repeat building) | not yet |
+| **ALT + CTRL + N** | Withdraw **×10**, keep the queue | not yet |
+| **ALT + N** | Deposit your inventory into the target | not yet |
+| **SHIFT + N** | Clear the queue without withdrawing | not yet |
+| **SHIFT + CTRL + N** | Dump runtime state to the log (developer tool) | yes |
+
+Right-click only queues while a welder or area welder is active and its block panel is showing — in
+block placement mode the game already uses right-click, so the planner stays out of the way.
+
+Queueing takes the block's **outstanding** components, not a full recipe: a part-welded block that
+needs 29 more plates queues 29, not 30.
 
 Withdrawal pulls from the container you are aiming at, widening to every conveyor-connected
 inventory on that grid (25 were swept in testing).

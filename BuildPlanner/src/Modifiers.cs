@@ -24,11 +24,21 @@ internal enum PlannerAction
     Deposit,
 
     /// <summary>
-    /// SHIFT: dump runtime state to the log.
+    /// SHIFT: empty the queue without withdrawing anything.
+    ///
+    /// Previously there was no way to do this at all - the queue could only be cleared as a side
+    /// effect of a successful withdrawal, so a player who queued the wrong block was stuck with it.
+    /// </summary>
+    ClearQueue,
+
+    /// <summary>
+    /// SHIFT + CTRL: dump runtime state to the log.
     ///
     /// The nearest thing to a breakpoint available here - a plugin cannot attach a debugger, and a
-    /// game restart plus world load costs about five minutes, so being able to snapshot live state
-    /// at the exact moment something looks wrong is worth a keybind. SHIFT was already unmapped.
+    /// game restart plus world load costs about five minutes, so snapshotting live state at the exact
+    /// moment something looks wrong is worth a binding. It sits behind the two-modifier combination
+    /// because it is a developer tool: clearing the queue is the interaction players actually want on
+    /// the simpler chord.
     /// </summary>
     Diagnose
 }
@@ -62,9 +72,10 @@ internal static class Modifiers
     /// </summary>
     internal static PlannerAction Resolve(bool ctrl, bool alt, bool shift = false)
     {
-        // Checked first: a diagnostic dump must never be mistaken for a withdrawal, and previously
-        // SHIFT was ignored entirely, so SHIFT+N silently performed a plain withdraw.
-        if (shift) return PlannerAction.Diagnose;
+        // SHIFT combinations are checked first: neither clearing nor a diagnostic dump may ever be
+        // mistaken for a withdrawal. Before SHIFT was handled at all it was ignored entirely, so
+        // SHIFT+N silently performed a plain withdraw.
+        if (shift) return ctrl ? PlannerAction.Diagnose : PlannerAction.ClearQueue;
 
         if (alt && ctrl) return PlannerAction.WithdrawTenKeepQueue;
         if (alt) return PlannerAction.Deposit;

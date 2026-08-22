@@ -45,7 +45,8 @@ internal sealed class Notifier
     internal void QueuedBlock(string blockName, int queueSize) =>
         Info($"Build Planner: queued {blockName} ({queueSize} total)");
 
-    internal void QueueCleared() => Info("Build Planner: queue cleared");
+    internal void QueueCleared(int cleared) =>
+        Info($"Build Planner: cleared {cleared} queued block(s)");
 
     internal void NothingQueued() => Warning("Build Planner: nothing queued");
 
