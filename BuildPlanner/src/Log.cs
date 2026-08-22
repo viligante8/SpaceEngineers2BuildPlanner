@@ -43,7 +43,7 @@ internal static class Log
     /// <summary>
     /// Verbose tracing: entity dumps, component lists, inventory contents, per-source transfer steps.
     ///
-    /// Off by default. These lines were essential while the client/server split was being diagnosed
+    /// These lines were essential while the client/server split was being diagnosed
     /// (notes/client-server-split.md) and are kept rather than deleted, because they are the only
     /// diagnostic tool this project has — there is no debugger attached to a shipped game. What they
     /// must not do is bury the outcome lines during normal play: a right-click wrote a dozen lines.
