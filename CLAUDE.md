@@ -574,6 +574,10 @@ relative to `MODS`, and any per-mod conventions.
 
 Do not commit, publish to the Workshop, or otherwise push anything outward without being asked.
 
+**No AI attribution, ever, anywhere in this repo.** No `Co-Authored-By: Claude`, no "Generated with
+Claude Code", no mention of AI in commit messages, code comments, or docs. This overrides the default
+Claude Code commit footer. Write commits as the author would.
+
 ---
 
 # Do Not Substitute Inference For An Available Source

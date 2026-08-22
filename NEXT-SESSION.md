@@ -5,8 +5,8 @@
 An SE2 **plugin** (not a data mod) that reproduces SE1's Build Planner: queue blocks, press a key at
 a container, receive exactly the components you are missing.
 
-**The core feature works and is verified in-game.** Read `BuildPlanner/README.md` for controls,
-status, and the gap list.
+**The withdrawal engine works and is verified in-game.** **Queueing was broken** and is fixed but
+untested — see "Immediate next step". Read `BuildPlanner/README.md` for controls and gaps.
 
 ## Read before touching plugin code
 
@@ -18,33 +18,61 @@ status, and the gap list.
 
 ## Immediate next step
 
-**Test the projections fix** (deployed 2026-08-22 00:26, never run).
+Rebuilt 2026-08-22 with a **root-cause fix** for two user-reported symptoms that were one bug.
+See `notes/build-planner-api.md`, "The block placer is NOT on the character". Untested in game.
 
-Right-clicking a *projection* should queue it. Previously failed with
-`no BlockPlacerEntityComponent on character` because the block placer is client-side while the
-character lookup had moved to the server session. The fix resolves each from its own session.
+The block placer was never found on the character (every right-click logged
+`no BlockPlacerEntityComponent on character or its parents`), so queueing always fell through to an
+interaction-based fallback that queued the *press-F target* rather than the crosshair block. Result:
+projections never queued, and normal blocks queued the wrong definition -> `N` withdrew a
+confidently wrong amount (1 Steel Plate instead of ~50).
 
-Test: launch, right-click a projected (holographic) block, check the log for
-`queued <block> (N total)`.
+Test, in one session:
 
-## Then, in order
+1. **Right-click a normal unfinished block.** Check the log line `requires N x <item>` (now always
+   logged) matches that block. This is the regression that was invisible before.
+2. **Right-click a projection (holographic block).** Expect `queued <block> (N total)`.
+3. **Press N at a container.** Expect the withdrawn amount to match `requires`.
+4. **Watch the HUD**, not just the log - notifications should now appear on screen.
 
-1. **HUD notifications** — messages currently go to the log only. Pattern to copy is in
-   `BuildPlanner/README.md` gap #2; resolve `InGameUI` from the **client** session.
-2. **Strip debug logging** back to outcomes and errors — but keep every branch reporting something.
-3. **Tests** — user asked for regression tests once it works. Unit-test the pure logic only; every
-   bug so far was an integration fact no unit test would catch. See CLAUDE.md "Testing Policy".
+Failure is now attributable without the debug flag: the log distinguishes
+`no block placer found` from `block placer found, but it has no aligned block`.
+
+## Then
+
+1. **Update the README** — move whatever passed out of "Awaiting in-game verification".
+2. Remaining gaps are genuinely unstarted: SHIFT/produce variants, the `G` queue screen,
+   multiplayer. See `BuildPlanner/README.md`.
+
+## Logging
+
+Verbose per-click tracing is now **off by default** (it buried the outcome lines under a dozen
+entity dumps per right-click). Outcomes, warnings, errors and binding results always log.
+
+Re-enable by creating an empty file — no rebuild, no launch-option change:
+
+```
+%APPDATA%\SpaceEngineers2\BuildPlanner\debug
+```
+
+Read once per run, so create it before launching.
+
+Log: `%APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log` (deliberately not under `Temp\Logs`,
+which the game clears on startup).
 
 ## Build and test loop
 
 ```
 cd BuildPlanner
 dotnet build -p:GameDir="F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2"
+
+cd BuildPlanner.Tests
+dotnet test          # 24 tests, pure logic only
 ```
 
 **The game must be closed to build** — it holds the DLL open (MSB3021 otherwise). The workflow that
 worked: ask the user to close the game, build, ask them to reopen, have them perform the action, then
-read `%APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log`.
+read the log.
 
 Tailing that log with a Monitor is worthwhile — results arrive without asking the user to copy
 anything.
@@ -60,3 +88,6 @@ anything.
   run after many rounds of inference. Use this trick early.
 - **Writing C# via shell heredocs.** Apostrophes break the heredoc and non-ASCII gets mangled to
   `0x97`. Two files needed `iconv` repair. Use the Write/Edit tools.
+- **Guessing at a private engine field.** Reading `Game2.Client.dll` metadata directly with
+  `System.Reflection.Metadata` settled the `InGameUI` question in one shot. The XML docs do not list
+  private fields, so absence there is not evidence of absence.

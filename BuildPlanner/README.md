@@ -9,18 +9,25 @@ list. It is always active once the launch option is set.
 
 ## Status
 
-**The core loop works, verified in-game.** Queue → aim at a container → press N → exactly the
-missing components arrive. Confirmed by the game's own inventory data, not just by the mod claiming
-success:
+**The core loop works, confirmed in-game 2026-08-22.** Aim at an unfinished block with a welder →
+right-click to queue → aim at a container → press N → exactly the missing components arrive, in the
+amounts the game's own block panel shows.
 
 ```
-requires 1 x Steel Plate
-shortfall is 1 item type(s)
-moved 1 x Steel Plate
-notify: Build Planner: withdrew 1x Steel Plate
+notify: Build Planner: queued Light Armor Cube (1 total)
+requires 30 x Steel Plate
+notify: Build Planner: withdrew 30x Steel Plate
 ```
 
-Known gaps are listed under "Not working yet".
+Getting there took three wrong turns, all recorded in `../notes/build-planner-api.md`. The one worth
+knowing: the queue summed `CubeBlockRecipeDefinition.CriticalItems`, which the XML docs define as
+*proportions* used "to generate the final recipe based on mass, efficiency and rounding" — not a
+component count. A 2.5m armour cube therefore asked for 1 Steel Plate instead of 30, and since the
+withdrawal is exact, the player got exactly one. The correct field is
+`CubeBlockDefinition.Items` — "computed when definition is post-processed".
+
+Still unconfirmed in-game: projections, HUD notifications, and the placement-mode guard. See
+"Awaiting in-game verification".
 
 ## Running it
 
@@ -76,30 +83,83 @@ consumed by exactly one context per frame.
 - Outcome reported on every path (withdrew / partial / nothing found / nothing queued / no target)
 - Rebindable key registered in the controls menu
 
+## Awaiting in-game verification
+
+Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, building is not done.
+
+1. **Projections.** Queueing now reads the welder's own target rather than hunting for the block
+   placer, and the tool component that supplies it also owns the projection state, so projections
+   should flow through the same path.
+   *Test:* right-click a projected (holographic) block; expect `queued <block> (N total)`.
+2. **HUD notifications.** `InGameUI` is borrowed from `InventoryNotificationsSessionComponent._ui`
+   (a private field, confirmed against `Game2.Client.dll` metadata) on the **client** session, then
+   `InGameUI.ShowNotification(HudNotification)` is called.
+   *Test:* any action — the message should appear on screen, not only in the log. Every failure to
+   reach the HUD logs its own reason (`notify: …`) and still records the message.
+3. **Placement-mode guard.** Right-click used to queue while in block/projection placement mode,
+   where the game already uses RMB. The captured tool component is now released on the tool's own
+   `CloseHUD`, and queueing additionally requires its block panel (`_screen`) to be open.
+   *Test:* enter placement mode and right-click — nothing should be queued; then switch back to the
+   welder and confirm queueing still works.
+
 ## Not working yet
 
-1. **Projections do not queue.** A fix is deployed but **untested**: `BlockPlacerEntityComponent` is
-   client-side, so it must be looked up on the *client* session's character while the inventory comes
-   from the *server* session's. See `../notes/client-server-split.md`. Next thing to test.
-2. **Notifications go to the log, not the HUD.** `Notifier` formats them correctly; the binding lacks
-   a usable `InGameUI` handle. The pattern to copy is
-   `InventoryNotificationsSessionComponent.DisplayItem`:
-   `_ui.ShowNotification(HudNotification.CreateTextNotification(icon, LocKey, priority, type))`.
-   `InGameUI` is `Keen.Game2.Client.UI.InGame.InGameUI`, injected as a `[Service]` — resolve it from
-   the **client** session.
-3. **SHIFT variants (produce / produce ×10)** are deliberately unmapped rather than silently behaving
+1. **SHIFT variants (produce / produce ×10)** are deliberately unmapped rather than silently behaving
    like a plain withdraw.
-4. **The `G` queue screen.** `BuildPlannerIconControl.axaml` ships with the game; whether it can be
+2. **The `G` queue screen.** `BuildPlannerIconControl.axaml` ships with the game; whether it can be
    surfaced is unverified. No visual queue inspection today.
-5. **Verbose debug logging** is still in. Strip it back to outcomes and errors once the remaining
-   pieces work — but keep *every branch* reporting something (see CLAUDE.md, "A silent code path is a
-   broken code path").
-6. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
+3. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
    against a real server.
-7. **No tests yet.** Deferred by agreement until the feature works. When added: unit-test the pure
-   logic (`BuildPlannerQueue.GetRequiredComponents`, `ComponentWithdrawal` outcome classification,
-   `Modifiers.Resolve`) — every bug found so far was an integration fact no unit test would have
-   caught.
+
+## Logging
+
+Outcomes, warnings, errors and binding results always log. The verbose per-click tracing (entity
+dumps, component lists, inventory contents) is **off by default** — it made a single right-click
+write a dozen lines and buried the outcome.
+
+Turn it back on by creating an empty file (no rebuild, no launch-option change):
+
+```
+%APPDATA%\SpaceEngineers2\BuildPlanner\debug
+```
+
+Read once per run. Every branch still reports *something* without it (CLAUDE.md, "A silent code path
+is a broken code path"); the flag only restores the supporting detail.
+
+## Tests
+
+```
+cd BuildPlanner.Tests
+dotnet test
+```
+
+24 tests, covering the logic that is decidable without the game running:
+
+| Unit | Why it is tested |
+|---|---|
+| `Modifiers.Resolve(ctrl, alt)` | branch order decides what ALT+CTRL means |
+| `ComponentWithdrawal.Classify` | picks the message the player acts on |
+| `BuildPlannerQueue.Accumulate` | merge + x10 must apply to *every* occurrence |
+
+Each was extracted from an engine-coupled caller specifically to be testable, and each has been
+mutation-checked — breaking the logic makes them fail, so they are not vacuous.
+
+**What these tests structurally cannot catch, and the honest record of it.** Every bug this feature
+has actually had was a fact about the engine, not an arithmetic slip:
+
+| Bug | Why no unit test would have caught it |
+|---|---|
+| Summed `Recipe.CriticalItems` (a *proportion*) instead of `CubeBlockDefinition.Items` (the computed recipe) — 1 Steel Plate instead of 30 | The wrong field is real and populated. Fabricated test data would have encoded the same wrong assumption. Settled by the XML docs. |
+| Block placer never found on the character | Only observable in a running game. |
+| Queued from `IInteractedEntityProvider` on the server character (the press-F target) | Same. |
+| Captured tool component stayed live in placement mode | Same. |
+
+So the suite is regression-proofing for refactors, **not** evidence the feature works. Nothing here
+substitutes for loading it — see "Awaiting in-game verification".
+
+Note `Private=true` on the engine references in the test csproj (the plugin uses `false`): the test
+host has no game assemblies loaded, so anything a test touches at runtime — `FixedPoint`, for
+instance — must be copied to the output folder.
 
 ## Layout
 
@@ -112,10 +172,13 @@ consumed by exactly one context per frame.
 | `BuildPlannerQueue.cs` | Planned blocks → merged component totals |
 | `ComponentWithdrawal.cs` | The transfer and its outcome |
 | `InventorySources.cs` | Aimed container → conveyor-reachable inventories |
+| `IntegrityToolAccess.cs` | The welder's current target — what to queue |
 | `PlayerAccess.cs` | Character and inventory lookup (both sessions) + diagnostics |
 | `Modifiers.cs` | Live CTRL/ALT/SHIFT state → action |
 | `Notifier.cs` | Outcome messages |
-| `Log.cs` | File logging |
+| `Log.cs` | File logging; `Log.Debug` is gated by the `debug` flag file |
+
+Tests live in `../BuildPlanner.Tests`.
 
 ## Building
 
