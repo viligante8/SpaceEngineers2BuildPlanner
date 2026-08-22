@@ -48,14 +48,14 @@ internal sealed class BuildPlannerController
         // remainder; asking for a full block's worth hands the player components they already put in.
         _queue.Add(block, BlockRequirements.Remaining(built, block));
         _notifier.QueuedBlock(block.UIData?.Name.ToString() ?? "block", _queue.Count);
-        EngineQueueMirror.Sync(_queue.Blocks, _clientSession());
+        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
     internal void ClearQueue()
     {
         _queue.Clear();
         _notifier.QueueCleared();
-        EngineQueueMirror.Sync(_queue.Blocks, _clientSession());
+        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
     /// <summary>

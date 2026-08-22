@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using Keen.Game2.Simulation.GameSystems.Ownership;
+using Keen.Game2.Simulation.GameSystems.Player;
 using Keen.Game2.Client.GameSystems.PlayerControl;
-using Keen.Game2.Client.WorldObjects.Tools;
 using Keen.Game2.Simulation.GameSystems.BuildPlanners;
+using Keen.Game2.Simulation.GameSystems.Ownership;
 using Keen.Game2.Simulation.GameSystems.Player;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks;
 using Keen.VRage.Core.Game.Systems;
@@ -41,11 +43,11 @@ internal static class EngineQueueMirror
     /// Called after every queue change. Rebuilding the whole list rather than tracking deltas keeps
     /// this a pure projection of our queue — there is no second piece of state to drift.
     /// </summary>
-    internal static void Sync(IReadOnlyList<CubeBlockDefinition> queue, Session? clientSession)
+    internal static void Sync(IReadOnlyList<CubeBlockDefinition> queue, Session? clientSession, Session? serverSession)
     {
         try
         {
-            var data = Resolve(clientSession);
+            var data = Resolve(clientSession, serverSession);
             if (data == null) return; // Resolve has already said why.
 
             var planned = data.PlannedBlocks;
@@ -82,27 +84,11 @@ internal static class EngineQueueMirror
     /// is using; the identity comes from <c>ClientPlayersSessionComponent.LocalPlayerIdentity</c>,
     /// a public property.
     /// </summary>
-    private static BuildPlannerData? Resolve(Session? clientSession)
+    internal static BuildPlannerData? Resolve(Session? clientSession, Session? serverSession)
     {
-        var tool = IntegrityToolAccess.Captured;
-        if (tool == null)
-        {
-            Log.Write("  mirror: no build tool captured yet; cannot reach per-player data");
-            return null;
-        }
-
         if (clientSession == null)
         {
             Log.Write("  mirror: no client session; cannot resolve the local player identity");
-            return null;
-        }
-
-        _playerDataField ??= typeof(IntegrityToolUIComponent).GetField(
-            "_playerData", BindingFlags.Instance | BindingFlags.NonPublic);
-
-        if (_playerDataField?.GetValue(tool) is not IPerPlayerData perPlayerData)
-        {
-            Log.Write("  mirror: IntegrityToolUIComponent._playerData unavailable");
             return null;
         }
 
@@ -114,13 +100,81 @@ internal static class EngineQueueMirror
         }
 
         var identity = players.LocalPlayerIdentity;
-        var data = perPlayerData.GetPerPlayerData<BuildPlannerData>(identity);
 
-        if (data == null)
-            Log.Write($"  mirror: no BuildPlannerData for identity {identity}; nothing to write into");
+        // The SERVER store, not the client one.
+        //
+        // Verified in game: asking InProcessPerPlayerDataClientSessionComponent (which is what the
+        // integrity tool holds) for BuildPlannerData returned null for every identity. That component
+        // only exposes data the server has replicated down. The server component
+        // InProcessPerPlayerDataSessionComponent is the one that owns and creates per-player data -
+        // it is the only one with GetOrCreateData / ObserveAndReplicateData.
+        var store = serverSession?.SessionComponents?.TryGet<InProcessPerPlayerDataSessionComponent>();
+        if (store == null)
+        {
+            Log.Write("  mirror: no InProcessPerPlayerDataSessionComponent on the server session");
+            return null;
+        }
 
-        return data;
+        var existing = store.GetPerPlayerData<BuildPlannerData>(identity);
+        if (existing != null)
+        {
+            Log.Write($"  mirror: found existing BuildPlannerData for identity {identity}");
+            return existing;
+        }
+
+        // Nothing in the shipping game ever creates a BuildPlannerData, so on a fresh world there is
+        // simply no instance to write into. Create one the same way the engine would.
+        return CreateData(store, identity);
     }
 
-    private static FieldInfo? _playerDataField;
+    /// <summary>
+    /// Create the player's BuildPlannerData through the engine's own creation path.
+    ///
+    /// <c>GetOrCreateData&lt;T&gt;(IdentityId, List&lt;object&gt;)</c> takes the identity's data
+    /// collection, which <c>GetOrCreateCollectionForIdentity</c> supplies. Both are reached by
+    /// reflection because they are not part of the public IPerPlayerData surface.
+    /// </summary>
+    private static BuildPlannerData? CreateData(InProcessPerPlayerDataSessionComponent store, IdentityId identity)
+    {
+        try
+        {
+            var type = store.GetType();
+
+            var getCollection = type.GetMethod(
+                "GetOrCreateCollectionForIdentity",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            var getOrCreate = type.GetMethod(
+                "GetOrCreateData",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            if (getCollection == null || getOrCreate == null)
+            {
+                Log.Write($"  mirror: creation API missing (GetOrCreateCollectionForIdentity={getCollection != null}," +
+                          $" GetOrCreateData={getOrCreate != null}); cannot create BuildPlannerData");
+                return null;
+            }
+
+            var collection = getCollection.Invoke(store, new object[] { identity });
+            if (collection == null)
+            {
+                Log.Write($"  mirror: no data collection for identity {identity}");
+                return null;
+            }
+
+            var created = getOrCreate
+                .MakeGenericMethod(typeof(BuildPlannerData))
+                .Invoke(store, new[] { (object)identity, collection }) as BuildPlannerData;
+
+            Log.Write($"  mirror: created BuildPlannerData for identity {identity}: {created != null}");
+            return created;
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: queueing and withdrawal never touch this.
+            Log.Error("creating BuildPlannerData failed", ex);
+            return null;
+        }
+    }
+
 }
