@@ -57,9 +57,20 @@ internal static class EngineQueueMirror
                 return;
             }
 
-            planned.Clear();
+            // Use the engine's own mutators, NOT the list directly.
+            //
+            // Decompiled, both AddPlannedBlock and RemovePlannedBlock end with
+            // OnPropertyChanged("PlannedBlocks"), and BuildPlannerData is marked [Replicate]. That
+            // notification is what pushes the change to the client copy and what
+            // TerminalScreenViewModel.UpdateBuildPlannerBlocks listens for.
+            //
+            // Writing to the List directly (as this did at first) mutates the server object silently:
+            // the log said "wrote 2 block(s)" while the client-side instance still reported 0, because
+            // no notification ever fired. AddPlannedBlock's second parameter is a count, defaulting
+            // to 1 - confirmed from source, not guessed.
+            for (var i = planned.Count - 1; i >= 0; i--) data.RemovePlannedBlock(i);
             foreach (var block in queue)
-                if (block != null) planned.Add(block);
+                if (block != null) data.AddPlannedBlock(block);
 
             // Always logged, not debug-gated. This line is the whole point of the mirror being
             // diagnosable: if it says N blocks were written and no screen shows them, the write

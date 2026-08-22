@@ -54,6 +54,7 @@ internal static class Diagnostics
             DumpQueue(queue);
             DumpTool();
             DumpPlannerChain(clientSession);
+            DumpServerPlanner(clientSession, serverSession);
             DumpTerminal();
             RunFileQueries(clientSession);
         }
@@ -138,6 +139,34 @@ internal static class Diagnostics
         catch (Exception ex)
         {
             Log.Error("dumping the planner chain failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// The SERVER-side planner data, alongside the client copy dumped above.
+    ///
+    /// These are different objects and the difference is the whole story: the mirror writes the
+    /// server instance, and the client instance only changes if the write raised OnPropertyChanged.
+    /// Seeing both counts side by side shows immediately whether replication happened.
+    /// </summary>
+    private static void DumpServerPlanner(Session? clientSession, Session? serverSession)
+    {
+        try
+        {
+            var data = EngineQueueMirror.Resolve(clientSession, serverSession);
+            Log.Write($"  SERVER planner: BuildPlannerData={Describe(data)}");
+
+            if (data?.PlannedBlocks == null) return;
+
+            Log.Write($"  SERVER planner: PlannedBlocks has {data.PlannedBlocks.Count} entry(ies)" +
+                      "   <- compare with the client count above; a mismatch means replication did not fire");
+
+            foreach (var b in data.PlannedBlocks)
+                Log.Write($"    - {b?.UIData?.Name.ToString() ?? "?"}");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("dumping the server planner failed", ex);
         }
     }
 
