@@ -38,6 +38,9 @@ internal static class IntegrityToolAccess
     /// </summary>
     private static IntegrityToolUIComponent? _current;
 
+    /// <summary>The captured component, for callers that need its services (see EngineQueueMirror).</summary>
+    internal static IntegrityToolUIComponent? Captured => _current;
+
     /// <summary>Remember the component the game just updated the tooltip on.</summary>
     internal static void Capture(IntegrityToolUIComponent? component)
     {

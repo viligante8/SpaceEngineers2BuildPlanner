@@ -306,3 +306,41 @@ which is the point after two failed ones. It is released on its own `CloseHUD()`
 **Gate queueing on `_screen`.** Without it the capture is sticky: after switching to block placement
 mode the component stays captured and right-click keeps queueing, in a mode where the game already
 binds RMB.
+
+## The engine's build planner data IS wired to the terminal (2026-08-22)
+
+An earlier note in this repo said `BuildPlannerData` was dead — "nothing populates or reads it".
+That is **half right and the wrong half matters**: nothing *populates* it, but the terminal screen
+already *reads* it.
+
+`Keen.Game2.Client.UI.TerminalScreen.TerminalScreenViewModel` holds:
+
+- `_buildPlannerData : BuildPlannerData`
+- `BuildPlannerBlocks : AvaloniaList<BuildPlannerBlockModel>` (bound to the UI)
+- `UpdateBuildPlannerBlocks(object, PropertyChangedEventArgs)`
+- `BuildPlannerBlock_ClearAll()`, `BuildPlannerBlock_ScheduleAll()`,
+  `ProduceBuildPlannerBlock(...)`, `RemoveBuildPlannerBlock(...)`
+
+So Keen shipped the screen and left the data empty. Filling
+`BuildPlannerData.PlannedBlocks` is how a mod gets queue visibility without building any UI.
+
+**Reaching it:**
+
+```csharp
+IPerPlayerData.GetPerPlayerData<BuildPlannerData>(IdentityId)   // Game2.Simulation.GameSystems.Player
+```
+
+- the `IPerPlayerData` service is borrowed from `IntegrityToolUIComponent._playerData`, so it is the
+  same instance the game uses
+- the identity is `ClientPlayersSessionComponent.LocalPlayerIdentity` (public property)
+
+**Method-of-discovery warning.** This was nearly missed twice. A reflection scan for "who references
+`BuildPlannerData`" was piped through `head -10`, and ten `BuildPlannerData+Serializer` entries filled
+the window — making it look like only serialization touched it. **When scanning for references,
+exclude the type's own nested types before truncating**, or the answer hides behind its own
+boilerplate.
+
+**Still unverified:** whether an already-open terminal refreshes (`UpdateBuildPlannerBlocks` is a
+`PropertyChanged` handler and `List.Add` raises no event), and what the second parameter of
+`AddPlannedBlock(CubeBlockDefinition, int)` means — count or index. The mirror writes to the
+`PlannedBlocks` list directly for that reason.

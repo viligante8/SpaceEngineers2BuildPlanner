@@ -46,12 +46,14 @@ internal sealed class BuildPlannerController
 
         _queue.Add(block);
         _notifier.QueuedBlock(block.UIData?.Name.ToString() ?? "block", _queue.Count);
+        EngineQueueMirror.Sync(_queue.Blocks, _clientSession());
     }
 
     internal void ClearQueue()
     {
         _queue.Clear();
         _notifier.QueueCleared();
+        EngineQueueMirror.Sync(_queue.Blocks, _clientSession());
     }
 
     /// <summary>
@@ -123,17 +125,14 @@ internal sealed class BuildPlannerController
             // NO interaction-based fallback.
             //
             // There used to be one here: GetAimedEntity -> IInteractedEntityProvider ("what entity is
-            // being interacted with", i.e. the press-F target), then TryGet<CubeBlockComponent>.
+            // being interacted with", i.e. the press-F target) on the SERVER character, then
+            // TryGet<CubeBlockComponent>. That answers a different question than "what is my welder
+            // pointed at" and could queue a block the player was not aiming at.
             //
-            // That is NOT the block under the crosshair, and it produced a silent wrong answer.
-            // Observed in game: the player right-clicked a heavy armor block and the mod queued
-            // "Light Armor Cube", then withdrew its 1 x Steel Plate instead of the ~50 the intended
-            // block needed. The player reasonably read that as a withdrawal bug; it was a queueing
-            // bug, and the fallback hid it by always producing *something* plausible.
-            //
-            // Queueing the wrong block is worse than queueing nothing: the withdrawal is exact, so a
-            // wrong queue silently yields a confidently wrong amount. If the placer cannot resolve a
-            // target, say so and queue nothing.
+            // It is not kept as a safety net because it always produced *something* plausible, which
+            // is worse than nothing: the withdrawal is exact, so a wrong queue yields a confidently
+            // wrong amount that looks like a withdrawal bug. The welder's own provider
+            // (IntegrityToolAccess) is the correct source and is tried first.
             _notifier.NothingToQueue();
         }
         catch (Exception ex)

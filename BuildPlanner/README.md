@@ -96,7 +96,10 @@ Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, bu
    `InGameUI.ShowNotification(HudNotification)` is called.
    *Test:* any action — the message should appear on screen, not only in the log. Every failure to
    reach the HUD logs its own reason (`notify: …`) and still records the message.
-3. **Placement-mode guard.** Right-click used to queue while in block/projection placement mode,
+3. **Terminal queue visibility.** The queue is mirrored into `BuildPlannerData`; the terminal screen
+   is already wired to that data.
+   *Test:* queue a few blocks, then open the terminal and look for them.
+4. **Placement-mode guard.** Right-click used to queue while in block/projection placement mode,
    where the game already uses RMB. The captured tool component is now released on the tool's own
    `CloseHUD`, and queueing additionally requires its block panel (`_screen`) to be open.
    *Test:* enter placement mode and right-click — nothing should be queued; then switch back to the
@@ -106,8 +109,14 @@ Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, bu
 
 1. **SHIFT variants (produce / produce ×10)** are deliberately unmapped rather than silently behaving
    like a plain withdraw.
-2. **The `G` queue screen.** `BuildPlannerIconControl.axaml` ships with the game; whether it can be
-   surfaced is unverified. No visual queue inspection today.
+2. **The terminal queue screen.** The queue is now mirrored into the engine's own
+   `BuildPlannerData.PlannedBlocks`, which `TerminalScreenViewModel` already binds to
+   (`BuildPlannerBlocks`, `UpdateBuildPlannerBlocks`, `BuildPlannerBlock_ClearAll`,
+   `BuildPlannerBlock_ScheduleAll`). Keen built the screen and left the data unpopulated; filling it
+   is what should make the queue visible in-game. **Unverified**, and two things are unknown: whether
+   an already-open terminal refreshes (the update handler is driven by `PropertyChanged`, which a
+   plain `List.Add` does not raise), and whether removing a block there feeds back to the mod's own
+   queue — it currently does not.
 3. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
    against a real server.
 
@@ -173,6 +182,7 @@ instance — must be copied to the output folder.
 | `ComponentWithdrawal.cs` | The transfer and its outcome |
 | `InventorySources.cs` | Aimed container → conveyor-reachable inventories |
 | `IntegrityToolAccess.cs` | The welder's current target — what to queue |
+| `EngineQueueMirror.cs` | Mirrors the queue into the engine's `BuildPlannerData` |
 | `PlayerAccess.cs` | Character and inventory lookup (both sessions) + diagnostics |
 | `Modifiers.cs` | Live CTRL/ALT/SHIFT state → action |
 | `Notifier.cs` | Outcome messages |
