@@ -116,6 +116,25 @@ Written, compiling, deployed — **not yet observed working**. Per CLAUDE.md, bu
    *Test:* enter placement mode and right-click — nothing should be queued; then switch back to the
    welder and confirm queueing still works.
 
+## Known limitations (decided, not oversights)
+
+**Queue range is the welder's reach.** You must be close enough that the block panel is showing,
+which sometimes means crouching for ground blocks. This was raised in testing and deliberately left
+alone (2026-08-22).
+
+The range lives in `RaycastEntityDetectorDefinition.MaxLength` on the tool's detector, and
+`DetectionArgs` has no per-call length override — so it is a property of a shared definition, not
+something a caller can vary. The two ways to extend it both cost something:
+
+- Run our own detection with `MaxLength` temporarily raised and restored. Welding range stays
+  correct, but right-click would have to be bound whenever a welder is equipped rather than only
+  while the panel shows — widening exactly the input claim that caused the inventory/projection bug.
+- Raise `MaxLength` outright. One field, robust, but it extends *welding* reach too, which is a
+  gameplay change.
+
+Neither was worth re-opening a freshly fixed input path. If revisited, prefer the first and gate
+right-click so it is never claimed while a terminal or inventory screen is open.
+
 ## Not working yet
 
 1. **SHIFT variants (produce / produce ×10)** are deliberately unmapped rather than silently behaving
