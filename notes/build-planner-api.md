@@ -961,3 +961,38 @@ what a player wants to withdraw is in the *output*, so collect them all rather t
 The tag pass is still worth keeping ahead of the type scan, but only for ORDER: a deposit wants a
 block's main or input inventory as its destination. When no tag is recognised that ordering is a
 guess, and the code says so in the log rather than pretending otherwise.
+
+## The HUD notification is one line and does not wrap (2026-08-22)
+
+`InGameUI.ShowNotification(HudNotification)` renders through `TextNotificationViewModel` into
+`HUDNotificationView`, whose compiled XAML builds the text block as:
+
+```csharp
+textBlock3.TextTrimming = TextTrimming.CharacterEllipsis;
+textBlock3.TextWrapping = TextWrapping.NoWrap;
+```
+
+inside a grid column of `MinWidth = 317`, `MaxWidth = 480`, with 20px margins either side. There is
+no wrapping to enable and no multi-line variant on this path: anything past roughly 440px is cut off
+with an ellipsis, unreadable.
+
+**Measured budget.** A screenshot of the live HUD settled what the pixel figure means in characters:
+`Build Planner: … 17x Construction Component` (43 chars) rendered in full, while a line of about 58
+was cut after roughly 50. The font is proportional, so a character count is only a proxy — the code
+uses 44 deliberately under the observed maximum.
+
+Consequences for any message this mod shows:
+
+- **Split long lists across several notifications**; the HUD stacks them.
+- **Never join two facts with a dash.** "withdrew A, B — still short C" put the more important half
+  where the ellipsis falls. Two notifications, one per fact.
+- **A long prefix and a long item name cannot share a line.** `Build Planner: nothing can make` is 31
+  characters and `17x Construction Component` is 26. When they do not fit, emit the prefix as a header
+  on its own line.
+- Continuation lines drop the `Build Planner: ` prefix — on a 44 character budget it was a third of
+  the line carrying no information.
+
+`ToastNotificationDefinition` (namespace `UI.HUD.Notifications`, **plural**) is a different system
+with a `Title` plus a `Content` "shown beneath the title", and may not share this constraint. It is
+definition-driven, so using it from a plugin would mean creating a definition at runtime the way the
+input actions do. Unexplored.

@@ -68,22 +68,31 @@ internal sealed class Notifier
     internal void AlreadyHaveEverything() => Info("Build Planner: you already have everything queued");
 
     internal void Withdrew(IReadOnlyList<ItemAmount> transferred) =>
-        Info($"Build Planner: withdrew {Summarize(transferred)}");
+        List("Build Planner: withdrew", transferred, NotificationType.Info);
 
-    internal void WithdrewPartial(IReadOnlyList<ItemAmount> transferred, IReadOnlyList<ItemAmount> missing) =>
-        Warning($"Build Planner: withdrew {Summarize(transferred)} — still short {Summarize(missing)}");
+    internal void WithdrewPartial(IReadOnlyList<ItemAmount> transferred, IReadOnlyList<ItemAmount> missing)
+    {
+        // Two messages, not one sentence. Joining them with an em dash produced a line far past what
+        // the HUD can show, so the half the player most needs - what is still missing - was the half
+        // that got cut off.
+        List("Build Planner: withdrew", transferred, NotificationType.Info);
+        List("Build Planner: still short", missing, NotificationType.Error);
+    }
 
     internal void NothingAvailable(IReadOnlyList<ItemAmount> missing) =>
-        Warning($"Build Planner: could not find {Summarize(missing)}");
+        List("Build Planner: could not find", missing, NotificationType.Error);
 
     internal void Producing(IReadOnlyList<ProductionOrder> orders) =>
-        Info($"Build Planner: producing {SummarizeOrders(orders)}");
+        List("Build Planner: producing", AsItems(orders), NotificationType.Info);
 
-    internal void ProducingPartial(IReadOnlyList<ProductionOrder> orders, IReadOnlyList<ItemAmount> unproducible) =>
-        Warning($"Build Planner: producing {SummarizeOrders(orders)} — cannot make {Summarize(unproducible)}");
+    internal void ProducingPartial(IReadOnlyList<ProductionOrder> orders, IReadOnlyList<ItemAmount> unproducible)
+    {
+        List("Build Planner: producing", AsItems(orders), NotificationType.Info);
+        List("Build Planner: cannot make", unproducible, NotificationType.Error);
+    }
 
     internal void CannotProduce(IReadOnlyList<ItemAmount> unproducible) =>
-        Warning($"Build Planner: nothing in reach can make {Summarize(unproducible)}");
+        List("Build Planner: nothing can make", unproducible, NotificationType.Error);
 
     internal void NoConverter() =>
         Warning("Build Planner: no assembler or refinery connected to that block");
@@ -101,33 +110,114 @@ internal sealed class Notifier
     /// them, while "producing 120x Steel Plate" is the number they can compare against the block
     /// panel. The run count stays in the log, where it is a diagnostic.
     /// </summary>
-    private static string SummarizeOrders(IReadOnlyList<ProductionOrder> orders)
+    private static List<ItemAmount> AsItems(IReadOnlyList<ProductionOrder> orders)
     {
-        if (orders == null || orders.Count == 0) return "nothing";
+        var items = new List<ItemAmount>(orders?.Count ?? 0);
+        if (orders == null) return items;
 
-        var items = new List<ItemAmount>(orders.Count);
         foreach (var order in orders) items.Add(new ItemAmount(order.Item, order.Amount));
-
-        return Summarize(items);
+        return items;
     }
 
-    /// <summary>Renders item amounts compactly, capped so a long list cannot flood the HUD.</summary>
-    private static string Summarize(IReadOnlyList<ItemAmount> items)
+    /// <summary>
+    /// The HUD notification is ONE LINE and does not wrap.
+    ///
+    /// From the compiled XAML of <c>HUDNotificationView</c>, the text block bound to Content is built
+    /// with:
+    ///
+    /// <code>
+    /// textBlock3.TextTrimming = TextTrimming.CharacterEllipsis;
+    /// textBlock3.TextWrapping = TextWrapping.NoWrap;
+    /// </code>
+    ///
+    /// inside a column of <c>MaxWidth = 480</c> with 20px margins either side. So anything longer
+    /// than roughly 440px of text is cut off with an ellipsis and simply cannot be read — which is
+    /// what happened to every multi-item withdrawal message.
+    ///
+    /// Long lists are therefore split across several notifications, which the HUD stacks. Continuing
+    /// lines are marked so they do not read as separate events.
+    ///
+    /// **The budget is measured, not calculated.** A screenshot of the real HUD settled it: a line of
+    /// 43 characters ("Build Planner: … 17x Construction Component") rendered with room to spare,
+    /// while one of about 58 was cut after roughly 48. The font is proportional, so a character count
+    /// is only a proxy - hence a deliberately conservative number rather than the observed maximum.
+    /// </summary>
+    private const int MaxLineChars = 44;
+
+    /// <summary>
+    /// Continuation lines drop the "Build Planner: " prefix.
+    ///
+    /// On a ~44 character budget that prefix was taking a third of every line for no information -
+    /// the first line already says whose message this is, and the ellipsis marks the rest as its
+    /// continuation.
+    /// </summary>
+    private const string ContinuationPrefix = "…";
+
+    /// <summary>
+    /// How many lines one report may take before the rest is summarised as a count. An area welder
+    /// selection can need a dozen component types, and burying the screen is its own failure.
+    /// </summary>
+    private const int MaxLines = 4;
+
+    private void List(string prefix, IReadOnlyList<ItemAmount> items, NotificationType type)
     {
-        if (items == null || items.Count == 0) return "nothing";
-
-        const int maxListed = 4;
-        var sb = new StringBuilder();
-
-        for (var i = 0; i < items.Count && i < maxListed; i++)
+        var parts = new List<string>();
+        if (items != null)
         {
-            if (sb.Length > 0) sb.Append(", ");
-            var item = items[i];
-            sb.Append((int)item.Amount).Append("x ").Append(item.Item?.DisplayName.ToString() ?? "?");
+            foreach (var item in items)
+            {
+                if (item.Item == null) continue;
+                parts.Add($"{(int)item.Amount}x {item.Item.DisplayName}");
+            }
         }
 
-        if (items.Count > maxListed) sb.Append(" +").Append(items.Count - maxListed).Append(" more");
+        if (parts.Count == 0)
+        {
+            Text($"{prefix} nothing", type);
+            return;
+        }
 
-        return sb.ToString();
+        var index = 0;
+        var line = 0;
+
+        // A long prefix plus a long item name cannot share a line: "Build Planner: nothing can make"
+        // is 31 characters and "17x Construction Component" is 26, so pairing them would overflow and
+        // be trimmed - the very thing this method exists to prevent. When they do not fit, the prefix
+        // becomes a header on its own and the items start on the next line, where only the ellipsis
+        // precedes them.
+        if (prefix.Length + 1 + parts[0].Length > MaxLineChars)
+        {
+            Text(prefix, type);
+            line = 1;
+        }
+
+        while (index < parts.Count)
+        {
+            if (line == MaxLines)
+            {
+                Text($"{ContinuationPrefix} +{parts.Count - index} more", type);
+                return;
+            }
+
+            var sb = new StringBuilder(line == 0 ? prefix : ContinuationPrefix);
+            var taken = 0;
+
+            while (index + taken < parts.Count)
+            {
+                var next = parts[index + taken];
+                var separator = taken == 0 ? " " : ", ";
+
+                // Always take at least one item, however long its name: a line that overflows is
+                // still better than a loop that never advances.
+                if (taken > 0 && sb.Length + separator.Length + next.Length > MaxLineChars) break;
+
+                sb.Append(separator).Append(next);
+                taken++;
+            }
+
+            Text(sb.ToString(), type);
+            index += taken;
+            line++;
+        }
     }
 }
