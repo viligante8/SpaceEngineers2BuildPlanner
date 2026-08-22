@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks;
 using Keen.Game2.Simulation.WorldObjects.Items;
@@ -9,10 +10,13 @@ namespace BuildPlanner;
 /// The queue of blocks the player intends to build, and the component totals they imply.
 ///
 /// SE2 ships <c>Keen.Game2.Simulation.GameSystems.BuildPlanners.BuildPlannerData</c> with a
-/// <c>PlannedBlocks</c> list and Add/Remove methods, but nothing populates or reads it — there is no
-/// keybind and no localized string for it anywhere in the shipping data. This class keeps its own
-/// queue so the feature works without depending on half-wired engine state; migrating onto
-/// BuildPlannerData later is a contained change (see notes/build-planner-api.md).
+/// <c>PlannedBlocks</c> list and Add/Remove methods, but nothing in the shipping game populates it —
+/// there is no keybind and no localized string for it anywhere in the data. (It *is* read: the
+/// terminal's build planner panel binds to it, which is what <see cref="EngineQueueMirror"/> and
+/// <see cref="TerminalPlannerPanel"/> exploit.) This class keeps its own queue so the feature works
+/// without depending on half-wired engine state — it also holds the per-block *outstanding*
+/// requirements, which <c>BuildPlannerData</c> has nowhere to put. Migrating onto BuildPlannerData
+/// later is a contained change (see notes/build-planner-api.md).
 /// </summary>
 internal sealed class BuildPlannerQueue
 {
@@ -28,7 +32,45 @@ internal sealed class BuildPlannerQueue
     private readonly List<Entry> _entries = new List<Entry>();
     private readonly List<CubeBlockDefinition> _blocks = new List<CubeBlockDefinition>();
 
+    private int _batchDepth;
+
+    /// <summary>
+    /// Raised after the queue changes, once per logical change.
+    ///
+    /// **This exists because forgetting to call the mirror was a real, shipped bug.** Every mutation
+    /// site used to be responsible for calling <see cref="EngineQueueMirror.Sync"/> itself, and the
+    /// withdrawal path — the one place that clears the queue as a side effect rather than as the
+    /// point of the operation — didn't. Nothing looked wrong until the terminal panel started
+    /// displaying the engine's list: withdrawing emptied the queue while the panel went on showing
+    /// every block, because the two had silently diverged.
+    ///
+    /// Making the queue announce its own changes moves that from "remember to call this" to
+    /// "impossible to miss".
+    /// </summary>
+    internal Action? Changed;
+
     internal int Count => _entries.Count;
+
+    /// <summary>
+    /// Coalesce a run of mutations into one <see cref="Changed"/>.
+    ///
+    /// Queueing an area welder's selection adds dozens of blocks; without this each one would
+    /// rebuild the engine's list and, through it, the terminal panel.
+    /// </summary>
+    internal void BeginBatch() => _batchDepth++;
+
+    /// <inheritdoc cref="BeginBatch"/>
+    internal void EndBatch()
+    {
+        if (_batchDepth > 0) _batchDepth--;
+        if (_batchDepth == 0) OnChanged();
+    }
+
+    private void OnChanged()
+    {
+        if (_batchDepth > 0) return;
+        Changed?.Invoke();
+    }
 
     /// <summary>Queued block definitions, for the engine mirror and the UI.</summary>
     internal IReadOnlyList<CubeBlockDefinition> Blocks => _blocks;
@@ -46,12 +88,50 @@ internal sealed class BuildPlannerQueue
 
         _entries.Add(new Entry(block, required ?? new List<ItemAmount>()));
         _blocks.Add(block);
+        OnChanged();
     }
 
     internal void Clear()
     {
         _entries.Clear();
         _blocks.Clear();
+        OnChanged();
+    }
+
+    /// <summary>
+    /// Drop one queued block by position.
+    ///
+    /// Added for the terminal panel's per-block remove button, which identifies a block by its index
+    /// in the displayed list. Both lists are kept strictly parallel — <see cref="Add"/> appends to
+    /// each — so one index addresses both.
+    /// </summary>
+    /// <returns>False when the index is out of range, so the caller can report rather than guess.</returns>
+    internal bool RemoveAt(int index)
+    {
+        if (index < 0 || index >= _entries.Count) return false;
+
+        _entries.RemoveAt(index);
+        _blocks.RemoveAt(index);
+        OnChanged();
+        return true;
+    }
+
+    /// <summary>The queued block at a position, or null when the index is out of range.</summary>
+    internal CubeBlockDefinition? BlockAt(int index)
+        => index >= 0 && index < _blocks.Count ? _blocks[index] : null;
+
+    /// <summary>
+    /// What one queued block still needs, for the terminal panel's per-block produce button.
+    /// </summary>
+    internal List<ItemAmount> GetRequiredComponentsAt(int index, int multiplier = 1)
+    {
+        if (index < 0 || index >= _entries.Count)
+        {
+            Log.Write($"  queue: no block at index {index}; nothing required");
+            return new List<ItemAmount>();
+        }
+
+        return Total(new[] { _entries[index] }, multiplier);
     }
 
     /// <summary>
@@ -75,12 +155,20 @@ internal sealed class BuildPlannerQueue
     /// <c>Items</c> is the post-processed, per-block result — the same figure the block tooltip
     /// shows the player.
     /// </remarks>
-    internal List<ItemAmount> GetRequiredComponents(int multiplier = 1)
+    internal List<ItemAmount> GetRequiredComponents(int multiplier = 1) => Total(_entries, multiplier);
+
+    /// <summary>
+    /// Merge a set of queue entries into per-item totals. The whole queue and a single entry go
+    /// through the same code so the panel's per-block button cannot drift from the keybind.
+    /// </summary>
+    private List<ItemAmount> Total(IEnumerable<Entry> entries, int multiplier)
     {
         var totals = new Dictionary<ItemDefinition, FixedPoint>();
+        var counted = 0;
 
-        foreach (var entry in _entries)
+        foreach (var entry in entries)
         {
+            counted++;
             foreach (var required in entry.Required)
             {
                 if (required.Item == null) continue;
@@ -98,8 +186,10 @@ internal sealed class BuildPlannerQueue
             Log.Write($"  requires {(int)entry.Value} x {entry.Key.DisplayName}");
         }
 
+        // Counts the entries actually totalled, not the whole queue: the panel's per-block button
+        // passes one entry, and "12 queued blocks need nothing further" would be a lie about it.
         if (result.Count == 0)
-            Log.Write($"  {_entries.Count} queued block(s) need nothing further");
+            Log.Write($"  {counted} queued block(s) need nothing further");
 
         return result;
     }

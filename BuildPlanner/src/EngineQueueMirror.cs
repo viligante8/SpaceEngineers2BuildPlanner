@@ -26,12 +26,12 @@ namespace BuildPlanner;
 /// cref="BuildPlannerQueue"/> remains the source of truth — so every failure here is logged and
 /// swallowed. Mirroring must never be able to break queueing or withdrawal.
 ///
-/// **Unverified:** whether the terminal refreshes while already open. <c>UpdateBuildPlannerBlocks</c>
-/// is a <c>PropertyChangedEventArgs</c> handler and a plain <c>List.Add</c> raises no such event, so
-/// the screen may only pick the queue up when it is next opened. Also unverified is the meaning of
-/// the second parameter of <c>BuildPlannerData.AddPlannedBlock(CubeBlockDefinition, int)</c> — count
-/// or index — which is why this writes to the <c>PlannedBlocks</c> list directly, where the types
-/// leave no room for a wrong guess.
+/// **Both earlier unknowns are now settled.** <c>AddPlannedBlock(CubeBlockDefinition block,
+/// int count = 1)</c> — the second parameter is a count, not an index. And the terminal refreshes
+/// while open *because this mod subscribes it*: Keen's own <c>UpdateBuildPlannerBlocks</c> is never
+/// handed to any event (no <c>ldftn</c> to it anywhere in <c>Game2.Client.dll</c>), so
+/// <see cref="TerminalPlannerPanel"/> listens for the <c>OnPropertyChanged("PlannedBlocks")</c> that
+/// the two mutators below raise, and refills the bound list itself.
 /// </summary>
 internal static class EngineQueueMirror
 {
@@ -59,16 +59,36 @@ internal static class EngineQueueMirror
             //
             // Decompiled, both AddPlannedBlock and RemovePlannedBlock end with
             // OnPropertyChanged("PlannedBlocks"), and BuildPlannerData is marked [Replicate]. That
-            // notification is what pushes the change to the client copy and what
-            // TerminalScreenViewModel.UpdateBuildPlannerBlocks listens for.
+            // notification is what pushes the change to the client copy, and it is what
+            // TerminalPlannerPanel subscribes to in order to refresh the terminal panel.
+            //
+            // NOT TerminalScreenViewModel.UpdateBuildPlannerBlocks - an earlier version of this
+            // comment said so and was wrong. That method has the right shape for the job but is
+            // never handed to any event anywhere in Game2.Client.dll, which is precisely why the
+            // panel needed wiring by hand.
             //
             // Writing to the List directly (as this did at first) mutates the server object silently:
             // the log said "wrote 2 block(s)" while the client-side instance still reported 0, because
             // no notification ever fired. AddPlannedBlock's second parameter is a count, defaulting
             // to 1 - confirmed from source, not guessed.
-            for (var i = planned.Count - 1; i >= 0; i--) data.RemovePlannedBlock(i);
-            foreach (var block in queue)
-                if (block != null) data.AddPlannedBlock(block);
+            // Batched, because this loop is a rebuild and every step of it notifies. Each
+            // RemovePlannedBlock and AddPlannedBlock raises OnPropertyChanged("PlannedBlocks"), so an
+            // unbatched rebuild made the terminal panel redraw itself 2N+1 times for a single queued
+            // block - observed in game as counts ticking 12..0 then 0..13 on one keypress.
+            // TerminalPlannerPanel.BeginBatch holds the refresh until the list is whole again.
+            TerminalPlannerPanel.BeginBatch();
+            try
+            {
+                for (var i = planned.Count - 1; i >= 0; i--) data.RemovePlannedBlock(i);
+                foreach (var block in queue)
+                    if (block != null) data.AddPlannedBlock(block);
+            }
+            finally
+            {
+                // finally, so a throw mid-rebuild cannot leave refreshes suppressed forever - that
+                // would silently freeze the panel for the rest of the session.
+                TerminalPlannerPanel.EndBatch();
+            }
 
             // Always logged, not debug-gated. This line is the whole point of the mirror being
             // diagnosable: if it says N blocks were written and no screen shows them, the write
@@ -87,11 +107,13 @@ internal static class EngineQueueMirror
     /// <summary>
     /// The local player's <see cref="BuildPlannerData"/>.
     ///
-    /// <c>IPerPlayerData.GetPerPlayerData&lt;T&gt;(IdentityId)</c> is the intended accessor. The
-    /// service instance is borrowed from the captured integrity tool component (its
-    /// <c>_playerData</c> field) rather than resolved independently, so it is the same one the game
-    /// is using; the identity comes from <c>ClientPlayersSessionComponent.LocalPlayerIdentity</c>,
-    /// a public property.
+    /// <c>IPerPlayerData.GetPerPlayerData&lt;T&gt;(IdentityId)</c> is the intended accessor, taken
+    /// off the SERVER session's <c>InProcessPerPlayerDataSessionComponent</c> — see the comment in
+    /// the body for why the client-side component cannot serve. The identity comes from
+    /// <c>ClientPlayersSessionComponent.LocalPlayerIdentity</c>, a public property.
+    ///
+    /// Also called by <see cref="TerminalPlannerPanel"/>, so the panel is handed the *same* instance
+    /// this writes into.
     /// </summary>
     internal static BuildPlannerData? Resolve(Session? clientSession, Session? serverSession)
     {

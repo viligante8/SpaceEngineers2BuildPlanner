@@ -432,6 +432,26 @@ internal static class BuildPlannerBinding
     }
 
     /// <summary>
+    /// The local player's <see cref="Keen.Game2.Simulation.GameSystems.BuildPlanners.BuildPlannerData"/>,
+    /// creating it if the world has none yet.
+    ///
+    /// Exposed for <see cref="TerminalPlannerPanel"/>, which needs the *same* instance
+    /// <see cref="EngineQueueMirror"/> writes into — the panel shows what the mirror wrote, and its
+    /// Produce/Clear buttons mutate it back. Resolved per call, since it is null at the main menu
+    /// and changes with each world load.
+    /// </summary>
+    internal static Keen.Game2.Simulation.GameSystems.BuildPlanners.BuildPlannerData? CurrentPlannerData()
+    {
+        if (_hostEntity == null)
+        {
+            Log.Write("  planner data: no host entity yet; cannot resolve the local player");
+            return null;
+        }
+
+        return EngineQueueMirror.Resolve(GetClientSession(_hostEntity), GetSession(_hostEntity));
+    }
+
+    /// <summary>
     /// The control-customisation component, captured the first time it publishes a mapping.
     /// It is the only route to a republish that also refreshes the controls menu.
     /// </summary>

@@ -33,10 +33,14 @@
     <Reference Include="VRage.DCS">         <HintPath>$(GameDir)\VRage.DCS.dll</HintPath>         <Private>false</Private></Reference>
     <Reference Include="VRage.Game">        <HintPath>$(GameDir)\VRage.Game.dll</HintPath>        <Private>false</Private></Reference>
     <Reference Include="VRage.UI.Shared">   <HintPath>$(GameDir)\VRage.UI.Shared.dll</HintPath>   <Private>false</Private></Reference>
+    <!-- ScreenView / ViewBase, the base types of the terminal screen and its view model. -->
+    <Reference Include="VRage.UI">          <HintPath>$(GameDir)\VRage.UI.dll</HintPath>          <Private>false</Private></Reference>
     <Reference Include="Game2.Client">      <HintPath>$(GameDir)\Game2.Client.dll</HintPath>      <Private>false</Private></Reference>
     <Reference Include="Game2.Game">        <HintPath>$(GameDir)\Game2.Game.dll</HintPath>        <Private>false</Private></Reference>
     <Reference Include="Game2.Simulation">  <HintPath>$(GameDir)\Game2.Simulation.dll</HintPath>  <Private>false</Private></Reference>
     <Reference Include="Avalonia.Base">     <HintPath>$(GameDir)\Avalonia.Base.dll</HintPath>     <Private>false</Private></Reference>
+    <!-- Control, TextBlock and the rest of the terminal panel's tree. -->
+    <Reference Include="Avalonia.Controls"> <HintPath>$(GameDir)\Avalonia.Controls.dll</HintPath> <Private>false</Private></Reference>
   </ItemGroup>
 
 </Project>

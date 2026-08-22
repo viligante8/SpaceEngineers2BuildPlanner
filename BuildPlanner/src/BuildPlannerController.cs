@@ -40,7 +40,15 @@ internal sealed class BuildPlannerController
         _notifier = notifier;
         _session = session;
         _clientSession = clientSession;
+
+        // One place the mirror is driven from. Call sites used to each remember to sync, and the
+        // withdrawal path did not - see BuildPlannerQueue.Changed for what that cost.
+        _queue.Changed = SyncMirror;
     }
+
+    /// <summary>Push the queue into the engine's BuildPlannerData, and thus into the terminal panel.</summary>
+    private void SyncMirror()
+        => EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
 
     internal BuildPlannerQueue Queue => _queue;
 
@@ -62,7 +70,6 @@ internal sealed class BuildPlannerController
         // remainder; asking for a full block's worth hands the player components they already put in.
         _queue.Add(block, BlockRequirements.Remaining(built, block));
         _notifier.QueuedBlock(displayName ?? block.UIData?.Name.ToString() ?? "block", _queue.Count);
-        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
     /// <summary>
@@ -83,18 +90,26 @@ internal sealed class BuildPlannerController
         }
 
         var added = 0;
-        foreach (var (built, definition) in blocks)
+        _queue.BeginBatch();
+        try
         {
-            if (definition == null) continue;
+            foreach (var (built, definition) in blocks)
+            {
+                if (definition == null) continue;
 
-            _queue.Add(definition, BlockRequirements.Remaining(built, definition));
-            added++;
+                _queue.Add(definition, BlockRequirements.Remaining(built, definition));
+                added++;
+            }
+        }
+        finally
+        {
+            // finally, so a throw cannot leave the queue permanently silent.
+            _queue.EndBatch();
         }
 
         if (added == 0) return;
 
         _notifier.QueuedBlocks(added, _queue.Count);
-        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
     internal void ClearQueue()
@@ -110,7 +125,6 @@ internal sealed class BuildPlannerController
         var cleared = _queue.Count;
         _queue.Clear();
         _notifier.QueueCleared(cleared);
-        EngineQueueMirror.Sync(_queue.Blocks, _clientSession(), _session());
     }
 
     /// <summary>
@@ -309,6 +323,31 @@ internal sealed class BuildPlannerController
             return;
         }
 
+        ProduceComponents(() => _queue.GetRequiredComponents(multiplier));
+    }
+
+    /// <summary>
+    /// The shared production path: resolve the player, find reachable converters, enqueue.
+    /// </summary>
+    /// <param name="requirements">
+    /// Deferred so the "requires N x …" log lines are only produced once the run is actually going
+    /// ahead — an early return would otherwise print a requirement list for work that never started.
+    /// </param>
+    /// <remarks>
+    /// **Reach is always resolved from the SERVER character**, including for the terminal panel's
+    /// buttons. An earlier revision let the panel pass `TerminalScreenViewModel.Interacted` instead,
+    /// on the reasoning that a player with a terminal open is not aiming at anything. That was wrong
+    /// in the way notes/client-server-split.md exists to warn about: the terminal view model is
+    /// `Game2.Client`, so its entity is the CLIENT copy, and `ItemConverterComponent` /
+    /// `InventoryComponent` are `Game2.Simulation` and live only on the SERVER copy. Every lookup
+    /// found nothing and produce reported "no assembler or refinery connected" while standing at a
+    /// working assembler. Observed in game 2026-08-22.
+    ///
+    /// The interaction provider already holds the block the terminal was opened on, so there is
+    /// nothing to override — the keybind's path is the correct one for both.
+    /// </remarks>
+    private void ProduceComponents(Func<List<ItemAmount>> requirements)
+    {
         var session = _session();
         if (session == null)
         {
@@ -346,7 +385,7 @@ internal sealed class BuildPlannerController
             return;
         }
 
-        var required = _queue.GetRequiredComponents(multiplier);
+        var required = requirements();
         var result = ComponentProduction.Produce(carried, converters, required);
 
         switch (result.Outcome)
@@ -374,6 +413,80 @@ internal sealed class BuildPlannerController
                 break;
         }
     }
+
+    // ---- Terminal panel entry points -------------------------------------------------------
+    //
+    // The panel Keen ships is wired to its own view model's verbs, which are half-built: their
+    // produce path only works with a production screen open, targets one converter, asks for the
+    // block's FULL recipe rather than the remainder, and returns a success flag that is seeded true
+    // and OR-ed so it can never be false. TerminalPlannerPanel replaces all four with these, so the
+    // buttons do exactly what the keybinds do. Evidence in notes/build-planner-api.md, "How much of
+    // the functionality did Keen ship?".
+
+    /// <summary>
+    /// The panel's **Produce** button: produce everything queued.
+    ///
+    /// Deliberately does NOT clear the queue, unlike Keen's version, which clears unconditionally —
+    /// including when nothing was scheduled, because of the return-flag bug. The reasoning is the
+    /// same as for <see cref="Produce"/>: production only starts the components, and the player still
+    /// has to come back and withdraw them.
+    /// </summary>
+    internal void ProduceQueueFromTerminal()
+    {
+        if (_queue.Count == 0)
+        {
+            _notifier.NothingQueued();
+            return;
+        }
+
+        Log.Write($"  panel: producing all {_queue.Count} queued block(s)");
+        ProduceComponents(() => _queue.GetRequiredComponents());
+    }
+
+    /// <summary>The panel's per-block produce button: produce just that block's outstanding components.</summary>
+    internal void ProduceOneFromTerminal(int index)
+    {
+        var block = _queue.BlockAt(index);
+        if (block == null)
+        {
+            // Never silent: an out-of-range index means the panel and the queue have drifted, which
+            // is a bug worth seeing rather than a click that appears to do nothing.
+            Log.Write($"  panel: produce requested for index {index}, which is not in the queue");
+            _notifier.NothingQueued();
+            return;
+        }
+
+        Log.Write($"  panel: producing '{Describe(block)}' (queue index {index})");
+        ProduceComponents(() => _queue.GetRequiredComponentsAt(index));
+    }
+
+    /// <summary>The panel's per-block remove button.</summary>
+    internal void RemoveQueuedFromTerminal(int index)
+    {
+        var block = _queue.BlockAt(index);
+
+        if (!_queue.RemoveAt(index))
+        {
+            Log.Write($"  panel: remove requested for index {index}, which is not in the queue");
+            return;
+        }
+
+        // Named on its own line so the log distinguishes the panel's button from the keybind. Both
+        // end in the same place, and without this a queue that emptied could not be attributed to
+        // either - the ambiguity that makes a log unreadable after the fact.
+        Log.Write($"  panel: removed '{Describe(block)}' (queue index {index}, {_queue.Count} left)");
+        _notifier.Info($"Build Planner: removed {Describe(block)} ({_queue.Count} left)");
+    }
+
+    /// <summary>The panel's **Clear** button. Routed so the mod's queue is the one that empties.</summary>
+    internal void ClearQueueFromTerminal()
+    {
+        Log.Write($"  panel: clearing all {_queue.Count} queued block(s)");
+        ClearQueue();
+    }
+
+    private static string Describe(CubeBlockDefinition? block)
+        => block?.UIData?.Name.ToString() ?? "block";
 
     /// <summary>ALT + middle-click: push the player's inventory into the target container.</summary>
     private void Deposit()

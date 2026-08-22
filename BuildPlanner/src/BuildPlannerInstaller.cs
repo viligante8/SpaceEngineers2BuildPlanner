@@ -11,6 +11,11 @@ using MonoMod.RuntimeDetour;
 // alias to be nameable here.
 using GScreenView = Keen.Game2.Client.UI.TerminalScreen.GScreen.GScreen;
 
+// Same collision, one level up: the terminal screen's type and its namespace share a name.
+using TerminalScreenView = Keen.Game2.Client.UI.TerminalScreen.TerminalScreen;
+using TerminalScreenViewModel = Keen.Game2.Client.UI.TerminalScreen.TerminalScreenViewModel;
+using BuildPlannerBlockModel = Keen.Game2.Client.UI.TerminalScreen.BuildPlanners.BuildPlannerBlockModel;
+
 namespace BuildPlanner;
 
 /// <summary>
@@ -57,6 +62,11 @@ internal sealed class BuildPlannerInstaller
     private static Hook? _tilePressedHook;
     private static Hook? _sizeTilePressedHook;
     private static Hook? _subTilePressedHook;
+    private static Hook? _terminalScreenHook;
+    private static Hook? _produceAllHook;
+    private static Hook? _clearAllHook;
+    private static Hook? _produceBlockHook;
+    private static Hook? _removeBlockHook;
 
     internal void Install(PluginHost host)
     {
@@ -94,6 +104,132 @@ internal sealed class BuildPlannerInstaller
 
         InstallIntegrityToolHook();
         InstallBuildMenuHooks();
+        InstallTerminalPanelHook();
+    }
+
+    /// <summary>
+    /// The terminal's build planner panel.
+    ///
+    /// Keen shipped the panel complete but switched off, and left the view model field that feeds it
+    /// unassigned — see <see cref="TerminalPlannerPanel"/> for the evidence. Hooking
+    /// <c>InitializeComponent</c> is the moment the screen's XAML has just been built, which is the
+    /// earliest point the panel exists to be found.
+    /// </summary>
+    private void InstallTerminalPanelHook()
+    {
+        var initializeComponent = typeof(TerminalScreenView).GetMethod(
+            "InitializeComponent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, new[] { typeof(bool) }, null);
+
+        if (initializeComponent == null)
+        {
+            Log.Write("  WARNING: TerminalScreen.InitializeComponent(bool) not found;" +
+                      " the queue will not be visible in the terminal");
+            return;
+        }
+
+        _terminalScreenHook = new Hook(initializeComponent, HookedTerminalInitializeComponent);
+        Log.Write("  hook installed on TerminalScreen.InitializeComponent");
+
+        InstallTerminalVerbHooks();
+    }
+
+    /// <summary>
+    /// Point the panel's four buttons at the mod instead of the view model's own half-built verbs.
+    ///
+    /// These REPLACE rather than wrap. Keen's produce path needs a production screen open, targets a
+    /// single converter, asks for each block's full recipe rather than its remainder, and returns a
+    /// success flag that cannot be false — so running it as well as ours would enqueue twice and
+    /// clear the queue on failure. The engine's own `PlannedBlocks` still ends up correct, because
+    /// every replacement routes through the mod's queue and the mirror rebuilds the engine list.
+    /// </summary>
+    private void InstallTerminalVerbHooks()
+    {
+        _produceAllHook = HookTerminalVerb(
+            "BuildPlannerBlock_ScheduleAll", Type.EmptyTypes, HookedProduceAll);
+
+        _clearAllHook = HookTerminalVerb(
+            "BuildPlannerBlock_ClearAll", Type.EmptyTypes, HookedClearAll);
+
+        _produceBlockHook = HookTerminalVerb(
+            "ProduceBuildPlannerBlock", new[] { typeof(BuildPlannerBlockModel) }, HookedProduceBlock);
+
+        _removeBlockHook = HookTerminalVerb(
+            "RemoveBuildPlannerBlock", new[] { typeof(BuildPlannerBlockModel) }, HookedRemoveBlock);
+    }
+
+    private static Hook? HookTerminalVerb(string methodName, Type[] parameters, Delegate replacement)
+    {
+        var method = typeof(TerminalScreenViewModel).GetMethod(
+            methodName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null, parameters, null);
+
+        if (method == null)
+        {
+            Log.Write($"  WARNING: TerminalScreenViewModel.{methodName} not found;" +
+                      " that panel button will run the game's own half-built version");
+            return null;
+        }
+
+        var hook = new Hook(method, replacement);
+        Log.Write($"  hook installed on TerminalScreenViewModel.{methodName}");
+        return hook;
+    }
+
+    private delegate void OriginalTerminalVerb(TerminalScreenViewModel self);
+
+    private delegate void OriginalTerminalBlockVerb(
+        TerminalScreenViewModel self, BuildPlannerBlockModel block);
+
+    // The originals are deliberately NOT called - see InstallTerminalVerbHooks.
+    private static void HookedProduceAll(OriginalTerminalVerb original, TerminalScreenViewModel self)
+        => Replace("Produce", () => TerminalPlannerPanel.OnProduceAll(self));
+
+    private static void HookedClearAll(OriginalTerminalVerb original, TerminalScreenViewModel self)
+        => Replace("Clear", () => TerminalPlannerPanel.OnClearAll(self));
+
+    private static void HookedProduceBlock(
+        OriginalTerminalBlockVerb original, TerminalScreenViewModel self, BuildPlannerBlockModel block)
+        => Replace("Produce block", () => TerminalPlannerPanel.OnProduceBlock(self, block));
+
+    private static void HookedRemoveBlock(
+        OriginalTerminalBlockVerb original, TerminalScreenViewModel self, BuildPlannerBlockModel block)
+        => Replace("Remove block", () => TerminalPlannerPanel.OnRemoveBlock(self, block));
+
+    /// <summary>
+    /// Run a replacement button handler, absorbing anything it throws.
+    ///
+    /// An exception escaping here would surface inside Avalonia's command dispatch, where the game
+    /// has no reason to expect one from a build planner button.
+    /// </summary>
+    private static void Replace(string what, Action handler)
+    {
+        try
+        {
+            handler();
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"the terminal panel's '{what}' button failed", ex);
+        }
+    }
+
+    private delegate void OriginalInitializeComponent(TerminalScreenView self, bool loadXaml);
+
+    private static void HookedTerminalInitializeComponent(
+        OriginalInitializeComponent original, TerminalScreenView self, bool loadXaml)
+    {
+        // Original first: it is what builds the panel we are about to go looking for.
+        original(self, loadXaml);
+
+        try
+        {
+            TerminalPlannerPanel.Install(self);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("wiring the terminal build planner panel failed", ex);
+        }
     }
 
     /// <summary>
