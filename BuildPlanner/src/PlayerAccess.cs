@@ -34,7 +34,7 @@ internal static class PlayerAccess
             var controller = players?.LocalPlayerController;
             if (controller == null)
             {
-                Log.Write("  debug: no LocalPlayerController (likely the server session)");
+                Log.Debug("  debug: no LocalPlayerController (likely the server session)");
 
                 // Server session: there is no local controller, but the character entities are all
                 // here. Take the one that owns an inventory - this is the half that actually holds
@@ -47,7 +47,7 @@ internal static class PlayerAccess
                         if (entity == null) continue;
 
                         var inventory = entity.FirstOrDefault<InventoryComponent>();
-                        Log.Write($"  debug: server character '{entity.DebugName}'" +
+                        Log.Debug($"  debug: server character '{entity.DebugName}'" +
                                   $" components={entity.Components.Length} hasInventory={inventory != null}");
 
                         if (inventory != null)
@@ -61,7 +61,7 @@ internal static class PlayerAccess
                 return null;
             }
 
-            Log.Write($"  debug: controller has {controller.ControlledEntities.Count} controlled entities");
+            Log.Debug($"  debug: controller has {controller.ControlledEntities.Count} controlled entities");
 
             for (var i = controller.ControlledEntities.Count - 1; i >= 0; i--)
             {
@@ -69,32 +69,32 @@ internal static class PlayerAccess
                 var entity = controllable?.Entity;
                 if (entity == null)
                 {
-                    Log.Write($"  debug: controlled[{i}] has no entity");
+                    Log.Debug($"  debug: controlled[{i}] has no entity");
                     continue;
                 }
 
                 var hasInventory = entity.FirstOrDefault<InventoryComponent>() != null;
-                Log.Write($"  debug: controlled[{i}] '{entity.DebugName}'" +
+                Log.Debug($"  debug: controlled[{i}] '{entity.DebugName}'" +
                           $" components={entity.Components.Length} hasInventory={hasInventory}");
 
                 // Seated: the character is the pilot, not the seat's grid.
                 var seat = entity.TryGet<Keen.Game2.Simulation.WorldObjects.CubeBlocks.Pilotable.SeatComponent>();
                 if (seat != null)
                 {
-                    Log.Write($"  debug: controlled[{i}] is a seat; following pilot '{seat.Pilot?.DebugName}'");
+                    Log.Debug($"  debug: controlled[{i}] is a seat; following pilot '{seat.Pilot?.DebugName}'");
                     return seat.Pilot;
                 }
 
                 if (entity.Data.Has<Keen.VRage.Core.WorldTransform>())
                 {
-                    Log.Write($"  debug: selected '{entity.DebugName}' as the character");
+                    Log.Debug($"  debug: selected '{entity.DebugName}' as the character");
                     return entity;
                 }
 
-                Log.Write($"  debug: controlled[{i}] has no WorldTransform; skipping");
+                Log.Debug($"  debug: controlled[{i}] has no WorldTransform; skipping");
             }
 
-            Log.Write("  debug: no controlled entity qualified as the character");
+            Log.Debug("  debug: no controlled entity qualified as the character");
         }
         catch (Exception ex)
         {
@@ -140,7 +140,7 @@ internal static class PlayerAccess
                 var inherited = parent.FirstOrDefault<InventoryComponent>();
                 if (inherited != null)
                 {
-                    Log.Write($"  debug: inventory found on parent entity '{parent.DebugName}'");
+                    Log.Debug($"  debug: inventory found on parent entity '{parent.DebugName}'");
                     return inherited;
                 }
 
@@ -154,7 +154,7 @@ internal static class PlayerAccess
             var fromChildren = FindInChildren<InventoryComponent>(character, 0);
             if (fromChildren != null)
             {
-                Log.Write("  debug: inventory found on a child entity");
+                Log.Debug("  debug: inventory found on a child entity");
                 return fromChildren;
             }
 
@@ -170,10 +170,10 @@ internal static class PlayerAccess
             }
             else
             {
-                Log.Write("  debug: no session passed; cannot search character entities");
+                Log.Debug("  debug: no session passed; cannot search character entities");
             }
 
-            Log.Write($"  debug: no InventoryComponent on '{DescribeEntity(character)}', its parents, or its children");
+            Log.Debug($"  debug: no InventoryComponent on '{DescribeEntity(character)}', its parents, or its children");
 
             // Full component dump, chunked so nothing is lost to log-line truncation. The filtered
             // summary above hides exactly the component whose real name we need.
@@ -202,19 +202,31 @@ internal static class PlayerAccess
     /// crosshair, so one lookup covers both. Projections are "non-real" blocks with no entity of
     /// their own, which is why they cannot be found with TryGet&lt;CubeBlockComponent&gt;.
     /// </summary>
-    internal static BlockPlacementTarget? GetAlignedBlockTarget(Entity? character)
+    internal static BlockPlacementTarget? GetAlignedBlockTarget(Entity? character, Session? clientSession = null)
     {
-        if (character == null) return null;
+        if (character == null && clientSession == null) return null;
 
         try
         {
             // The character carries BlockPlacerStateProviderComponent, not BlockPlacerEntityComponent
             // (confirmed in game). The placer itself lives elsewhere in the hierarchy, so search the
             // entity and then its parents, the same shape as the inventory lookup.
-            var placer = FindInHierarchy<BlockPlacerEntityComponent>(character);
+            var placer = character != null ? FindInHierarchy<BlockPlacerEntityComponent>(character) : null;
+
             if (placer == null)
             {
-                Log.Write("  debug: no BlockPlacerEntityComponent on character or its parents");
+                // The hierarchy walk has never once succeeded in game - every right-click logged
+                // "no BlockPlacerEntityComponent on character or its parents", which is why
+                // queueing always fell through to the interaction-based path and queued the wrong
+                // block. So do not depend on the placer hanging off the character at all: ask the
+                // client session for whichever entity owns one, the same way the character lookup
+                // asks the server session for whichever entity owns an inventory.
+                placer = FindPlacerInSession(clientSession);
+            }
+
+            if (placer == null)
+            {
+                Log.Write("  Build Planner: no block placer found (equip a build tool?)");
                 return null;
             }
 
@@ -228,16 +240,65 @@ internal static class PlayerAccess
             var lastLookedAt = GetLastLookedAtTarget(placer);
             if (lastLookedAt != null)
             {
-                Log.Write("  debug: using last-looked-at block (AlignedBlock was null)");
+                Log.Debug("  debug: using last-looked-at block (AlignedBlock was null)");
                 return lastLookedAt;
             }
 
-            Log.Write("  debug: placer present but no aligned or last-looked-at block");
+            // Always logged, not debug-gated: this is the difference between "the placer could not be
+            // found" and "the placer was found but you were not pointing at a block". Those need
+            // completely different fixes, and both surface to the player as the same message.
+            Log.Write("  Build Planner: block placer found, but it has no aligned block" +
+                      " (crosshair not on a block?)");
             return null;
         }
         catch (Exception ex)
         {
             Log.Error("GetAlignedBlockTarget failed", ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Find the block placer by asking the CLIENT session for the entity that owns one.
+    ///
+    /// BlockPlacerEntityComponent is a GameComponent (entity-level, confirmed from Game2.Client.dll
+    /// metadata), but it does not sit on the character or any of its ancestors - the hierarchy walk
+    /// failed on every right-click in testing. Enumerating the session sidesteps the question of
+    /// where exactly it is mounted.
+    ///
+    /// Client session specifically: the placer is Game2.Client, and the server session does not have
+    /// one. See notes/client-server-split.md.
+    /// </summary>
+    private static BlockPlacerEntityComponent? FindPlacerInSession(Session? clientSession)
+    {
+        if (clientSession == null)
+        {
+            Log.Debug("  debug: no client session; cannot search for a block placer");
+            return null;
+        }
+
+        try
+        {
+            var examined = 0;
+
+            foreach (var entity in clientSession.GetEntitiesOfType<BlockPlacerEntityComponent>())
+            {
+                if (entity == null) continue;
+                examined++;
+
+                var placer = entity.FirstOrDefault<BlockPlacerEntityComponent>();
+                if (placer == null) continue;
+
+                Log.Debug($"  debug: block placer found on '{entity.DebugName}'");
+                return placer;
+            }
+
+            Log.Debug($"  debug: no block placer among {examined} candidate entities in the client session");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("FindPlacerInSession failed", ex);
             return null;
         }
     }
@@ -349,12 +410,12 @@ internal static class PlayerAccess
 
                 if (++index % ComponentsPerLogLine == 0)
                 {
-                    Log.Write($"  debug: components[{index - ComponentsPerLogLine}..{index - 1}]: {line}");
+                    Log.Debug($"  debug: components[{index - ComponentsPerLogLine}..{index - 1}]: {line}");
                     line.Clear();
                 }
             }
 
-            if (line.Length > 0) Log.Write($"  debug: components[tail]: {line}");
+            if (line.Length > 0) Log.Debug($"  debug: components[tail]: {line}");
         }
         catch (Exception ex)
         {
@@ -379,12 +440,12 @@ internal static class PlayerAccess
                 var hasInventory = current.FirstOrDefault<InventoryComponent>() != null;
                 var componentCount = current.Components.Length;
 
-                Log.Write($"  debug: hierarchy[{depth}] '{current.DebugName}'" +
+                Log.Debug($"  debug: hierarchy[{depth}] '{current.DebugName}'" +
                           $" components={componentCount} hasInventory={hasInventory}");
 
                 if (!current.Data.TryGet<ParentData>(out var parentData))
                 {
-                    Log.Write($"  debug: hierarchy[{depth}] has no parent (top of chain)");
+                    Log.Debug($"  debug: hierarchy[{depth}] has no parent (top of chain)");
                     break;
                 }
 
@@ -423,7 +484,7 @@ internal static class PlayerAccess
                 var found = child.FirstOrDefault<T>();
                 if (found != null)
                 {
-                    Log.Write($"  debug: found {typeof(T).Name} on child '{child.DebugName}' at depth {depth + 1}");
+                    Log.Debug($"  debug: found {typeof(T).Name} on child '{child.DebugName}' at depth {depth + 1}");
                     return found;
                 }
 
@@ -451,7 +512,7 @@ internal static class PlayerAccess
 
             if (children == null)
             {
-                if (depth == 0) Log.Write("  debug: character has no HierarchyComponent children");
+                if (depth == 0) Log.Debug("  debug: character has no HierarchyComponent children");
                 return;
             }
 
@@ -460,7 +521,7 @@ internal static class PlayerAccess
                 if (child == null) continue;
 
                 var childInventory = child.FirstOrDefault<InventoryComponent>();
-                Log.Write($"  debug: child[depth {depth + 1}] '{child.DebugName}'" +
+                Log.Debug($"  debug: child[depth {depth + 1}] '{child.DebugName}'" +
                           $" components={child.Components.Length} hasInventory={childInventory != null}");
 
                 if (childInventory != null) LogInventoryContents(child.DebugName, childInventory);
@@ -501,7 +562,7 @@ internal static class PlayerAccess
                 }
             }
 
-            Log.Write($"  debug: inventory of '{owner}' holds: {(count == 0 ? "EMPTY" : contents.ToString())}");
+            Log.Debug($"  debug: inventory of '{owner}' holds: {(count == 0 ? "EMPTY" : contents.ToString())}");
         }
         catch (Exception ex)
         {
@@ -537,13 +598,13 @@ internal static class PlayerAccess
                 if (inventory == null) continue;
 
                 var isOurs = ReferenceEquals(entity, ourCharacter);
-                Log.Write($"  debug: character entity '{entity.DebugName}' HAS an inventory (isOurs={isOurs})");
+                Log.Debug($"  debug: character entity '{entity.DebugName}' HAS an inventory (isOurs={isOurs})");
                 LogInventoryContents(entity.DebugName, inventory);
 
                 firstFound ??= inventory;
             }
 
-            Log.Write($"  debug: examined {examined} character entities in the session");
+            Log.Debug($"  debug: examined {examined} character entities in the session");
             return firstFound;
         }
         catch (Exception ex)
@@ -560,13 +621,24 @@ internal static class PlayerAccess
     /// </summary>
     internal static Entity? GetClientCharacter(Session? clientSession)
     {
-        if (clientSession == null) return null;
+        if (clientSession == null)
+        {
+            Log.Debug("  debug: client character: no client session");
+            return null;
+        }
 
         try
         {
             var players = clientSession.SessionComponents?.TryGet<ClientPlayersSessionComponent>();
             var controller = players?.LocalPlayerController;
-            if (controller == null) return null;
+            if (controller == null)
+            {
+                // If this fires, the session passed in was not the client half - the client session
+                // is defined by having a LocalPlayerController. Reported rather than returning
+                // silently, because a null here is indistinguishable from "no character found".
+                Log.Debug("  debug: client character: no LocalPlayerController on the client session");
+                return null;
+            }
 
             for (var i = controller.ControlledEntities.Count - 1; i >= 0; i--)
             {
@@ -575,10 +647,22 @@ internal static class PlayerAccess
                 if (entity == null) continue;
 
                 var seat = entity.TryGet<Keen.Game2.Simulation.WorldObjects.CubeBlocks.Pilotable.SeatComponent>();
-                if (seat != null) return seat.Pilot;
+                if (seat != null)
+                {
+                    Log.Debug($"  debug: client character is seated; following pilot '{seat.Pilot?.DebugName}'");
+                    return seat.Pilot;
+                }
 
-                if (entity.Data.Has<Keen.VRage.Core.WorldTransform>()) return entity;
+                if (entity.Data.Has<Keen.VRage.Core.WorldTransform>())
+                {
+                    Log.Debug($"  debug: client character '{entity.DebugName}'" +
+                              $" components={entity.Components.Length}");
+                    return entity;
+                }
             }
+
+            Log.Debug($"  debug: client character: none of {controller.ControlledEntities.Count}" +
+                      " controlled entities qualified");
         }
         catch (Exception ex)
         {

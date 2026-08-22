@@ -72,8 +72,24 @@ internal sealed class BuildPlannerController
         try
         {
             BuildPlannerBinding.LogContextState("on right-click:");
+
+            // Primary source: the blocks the game's own tooltip is showing. This is the same data
+            // that drives the "you need N x Steel Plate" panel, so what gets queued is by definition
+            // what the player is looking at. See IntegrityToolAccess for why the two earlier routes
+            // (block placer, interacted entity) were both wrong.
+            var targeted = IntegrityToolAccess.GetTargetedBlocks();
+            if (targeted.Count > 0)
+            {
+                foreach (var definition in targeted) QueueBlock(definition);
+                return;
+            }
+
             var session = _session();
-            if (session == null) return;
+            if (session == null)
+            {
+                _notifier.Warning("Build Planner: no active session");
+                return;
+            }
 
             var character = PlayerAccess.GetLocalCharacter(session);
 
@@ -81,7 +97,17 @@ internal sealed class BuildPlannerController
             // on the CLIENT session's character - not the server character that owns the inventory.
             // Both exist in-process and are confusingly both named "CompositeCharacterServer".
             var clientCharacter = PlayerAccess.GetClientCharacter(_clientSession());
-            var placementTarget = PlayerAccess.GetAlignedBlockTarget(clientCharacter ?? character);
+            if (clientCharacter == null)
+            {
+                // Falling back to the server character is near-certain to fail — the block placer is
+                // a client-only component and the server character does not carry one — but it is
+                // kept so a layout we have not seen still gets a chance. Say which half is in use so
+                // a later "no placer" line is attributable.
+                Log.Debug("  debug: no client character; falling back to the server character" +
+                          " (the block placer is client-side, so this will likely find nothing)");
+            }
+
+            var placementTarget = PlayerAccess.GetAlignedBlockTarget(clientCharacter ?? character, _clientSession());
             if (placementTarget != null)
             {
                 if (placementTarget.BuildProgress >= 1f)
@@ -94,23 +120,21 @@ internal sealed class BuildPlannerController
                 return;
             }
 
-            // Fallback: a real block entity under the crosshair, when the placer has no target
-            // (for example when no build tool is active).
-            var target = GetAimedEntity(character);
-            var block = target?.TryGet<CubeBlockComponent>();
-            if (block == null)
-            {
-                _notifier.NothingToQueue();
-                return;
-            }
-
-            if (block.EffectiveBuildProgress >= 1f)
-            {
-                _notifier.AlreadyComplete();
-                return;
-            }
-
-            QueueBlock(block.Definition);
+            // NO interaction-based fallback.
+            //
+            // There used to be one here: GetAimedEntity -> IInteractedEntityProvider ("what entity is
+            // being interacted with", i.e. the press-F target), then TryGet<CubeBlockComponent>.
+            //
+            // That is NOT the block under the crosshair, and it produced a silent wrong answer.
+            // Observed in game: the player right-clicked a heavy armor block and the mod queued
+            // "Light Armor Cube", then withdrew its 1 x Steel Plate instead of the ~50 the intended
+            // block needed. The player reasonably read that as a withdrawal bug; it was a queueing
+            // bug, and the fallback hid it by always producing *something* plausible.
+            //
+            // Queueing the wrong block is worse than queueing nothing: the withdrawal is exact, so a
+            // wrong queue silently yields a confidently wrong amount. If the placer cannot resolve a
+            // target, say so and queue nothing.
+            _notifier.NothingToQueue();
         }
         catch (Exception ex)
         {

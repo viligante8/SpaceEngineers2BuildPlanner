@@ -35,7 +35,7 @@ internal static class InventorySources
             // definitions use "Inventory", with In/Out variants on some blocks), and an untagged
             // TryGet cannot disambiguate when several exist — the same trap that made the character
             // inventory lookup fail. Try the common tags, then fall back to untagged.
-            Log.Write($"  debug: aimed entity '{target.DebugName}' components={target.Components.Length}");
+            Log.Debug($"  debug: aimed entity '{target.DebugName}' components={target.Components.Length}");
 
             var direct = FindInventory(target);
             if (direct != null)
@@ -43,21 +43,21 @@ internal static class InventorySources
                 sources.Add(direct);
                 PlayerAccess.LogInventoryContents(target.DebugName, direct);
             }
-            else Log.Write("  debug: aimed entity has no InventoryComponent");
+            else Log.Debug("  debug: aimed entity has no InventoryComponent");
 
             // Then the rest of the grid's storage, reached through the block's grid.
             var block = target.TryGet<CubeBlockComponent>();
             var gridEntity = block?.Grid?.Entity;
             if (gridEntity == null)
             {
-                Log.Write("  debug: aimed entity is not a grid block; no conveyor sweep");
+                Log.Debug("  debug: aimed entity is not a grid block; no conveyor sweep");
                 return sources;
             }
 
             var inventorySystem = gridEntity.TryGet<InventorySystemComponent>();
             if (inventorySystem == null)
             {
-                Log.Write($"  debug: grid '{gridEntity.DebugName}' has no InventorySystemComponent");
+                Log.Debug($"  debug: grid '{gridEntity.DebugName}' has no InventorySystemComponent");
                 return sources;
             }
 
@@ -73,7 +73,7 @@ internal static class InventorySources
             Log.Error("CollectFrom failed", ex);
         }
 
-        Log.Write($"  debug: collected {sources.Count} source inventories");
+        Log.Debug($"  debug: collected {sources.Count} source inventories");
         return sources;
     }
 

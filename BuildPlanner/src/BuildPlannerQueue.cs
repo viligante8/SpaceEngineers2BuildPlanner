@@ -38,8 +38,19 @@ internal sealed class BuildPlannerQueue
     /// Scales every amount. The SE1 Build Planner's CTRL variants withdraw tenfold; pass 10 for those.
     /// </param>
     /// <remarks>
-    /// Only <see cref="CubeBlockRecipeDefinition.CriticalItems"/> is summed. OptionalItems are exactly
-    /// that — optional — and pulling them would take more from storage than the player asked for.
+    /// Uses <see cref="CubeBlockDefinition.Items"/> — "Collection of items necessary to build the
+    /// block. Computed when definition is post-processed."
+    ///
+    /// **Do not use <c>Recipe.CriticalItems</c> here.** That was this feature's longest-lived bug.
+    /// CubeBlockRecipeDefinition is documented as defining "the *proportions* and criticality of
+    /// items... used to generate the final recipe based on mass, efficiency and rounding amounts" —
+    /// it is a ratio shared across every block that uses that recipe, not a component count. Reading
+    /// it made a 2.5m light armor cube ask for 1 Steel Plate instead of 30, and because the
+    /// withdrawal is exact, the player got exactly one plate. The same recipe object is referenced by
+    /// the 0.5m variant, which is why the wrong answer still looked like a plausible block.
+    ///
+    /// <c>Items</c> is the post-processed, per-block result — the same figure the block tooltip
+    /// shows the player.
     /// </remarks>
     internal List<ItemAmount> GetRequiredComponents(int multiplier = 1)
     {
@@ -47,17 +58,19 @@ internal sealed class BuildPlannerQueue
 
         foreach (var block in _blocks)
         {
-            var recipe = block?.Recipe;
-            if (recipe?.CriticalItems == null) continue;
+            if (block == null) continue;
 
-            foreach (var required in recipe.CriticalItems)
+            var items = block.Items;
+            if (items.IsDefaultOrEmpty)
+            {
+                Log.Write($"  WARNING: '{block.UIData?.Name}' has no computed Items; nothing to queue for it");
+                continue;
+            }
+
+            foreach (var required in items)
             {
                 if (required.Item == null) continue;
-
-                var amount = required.Amount * multiplier;
-                totals[required.Item] = totals.TryGetValue(required.Item, out var running)
-                    ? running + amount
-                    : amount;
+                Accumulate(totals, required.Item, required.Amount, multiplier);
             }
         }
 
@@ -65,12 +78,37 @@ internal sealed class BuildPlannerQueue
         foreach (var entry in totals)
         {
             result.Add(new ItemAmount(entry.Key, entry.Value));
-            Log.Write($"  debug: requires {(int)entry.Value} x {entry.Key.DisplayName}");
+            // Always logged. This line is what makes a wrong queue visible: "1 x Steel Plate" for a
+            // heavy armor block is obviously wrong at a glance, and burying it behind the debug flag
+            // is how a queueing bug got reported as a withdrawal bug.
+            Log.Write($"  requires {(int)entry.Value} x {entry.Key.DisplayName}");
         }
 
         if (result.Count == 0)
-            Log.Write($"  debug: {_blocks.Count} queued block(s) produced NO component requirements");
+            Log.Debug($"  debug: {_blocks.Count} queued block(s) produced NO component requirements");
 
         return result;
+    }
+
+    /// <summary>
+    /// Add one requirement into the running totals, scaled by the multiplier.
+    /// </summary>
+    /// <remarks>
+    /// Generic over the key only so it can be unit-tested: <see cref="ItemDefinition"/> cannot be
+    /// constructed outside a loaded game, but the arithmetic here is pure and is the part that can
+    /// silently regress — the multiplier must apply to *every* occurrence of an item, including the
+    /// second and later times the same item type is seen, or a x10 withdrawal of two identical
+    /// blocks comes out short.
+    ///
+    /// This does NOT guard against reading the wrong source field; that was a semantic fact about
+    /// the engine (Recipe.CriticalItems is a proportion, CubeBlockDefinition.Items is the computed
+    /// recipe) and no test over fabricated data could have caught it.
+    /// </remarks>
+    internal static void Accumulate<TKey>(
+        Dictionary<TKey, FixedPoint> totals, TKey key, FixedPoint amount, int multiplier)
+        where TKey : notnull
+    {
+        var scaled = amount * multiplier;
+        totals[key] = totals.TryGetValue(key, out var running) ? running + scaled : scaled;
     }
 }

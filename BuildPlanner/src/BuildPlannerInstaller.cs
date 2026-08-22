@@ -46,6 +46,8 @@ internal sealed class BuildPlannerInstaller
 
     private static Hook? _initHook;
     private static Hook? _setMappingHook;
+    private static Hook? _integrityToolHook;
+    private static Hook? _integrityToolCloseHook;
 
     internal void Install(PluginHost host)
     {
@@ -80,6 +82,89 @@ internal sealed class BuildPlannerInstaller
 
         _setMappingHook = new Hook(setMapping, HookedSetMapping);
         Log.Write("  hook installed on ControlCustomizationEngineComponent.SetMapping");
+
+        InstallIntegrityToolHook();
+    }
+
+    /// <summary>
+    /// Capture the component that feeds the block tooltip.
+    ///
+    /// This is how the Build Planner learns what block the player is aiming at. Two earlier routes
+    /// failed in game: BlockPlacerEntityComponent could not be located at all, and the interacted-
+    /// entity provider returned the press-F target rather than the crosshair block. UpdateUI runs on
+    /// the component that populates the "you need N x Steel Plate" panel, so hooking it hands us the
+    /// exact instance the game is already using - no lookup, no guessing where it lives.
+    /// </summary>
+    private void InstallIntegrityToolHook()
+    {
+        var updateUI = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent).GetMethod(
+            "UpdateUI", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+        if (updateUI == null)
+        {
+            Log.Write("  ERROR: IntegrityToolUIComponent.UpdateUI not found; queueing will not work");
+            return;
+        }
+
+        _integrityToolHook = new Hook(updateUI, HookedUpdateUI);
+        Log.Write("  hook installed on IntegrityToolUIComponent.UpdateUI");
+
+        // CloseHUD is the tool saying "I am no longer showing a block". Without this the captured
+        // component stays live after the player switches to block placement mode, where right-click
+        // already means something else - queueing there was the reported bug.
+        var closeHud = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent).GetMethod(
+            "CloseHUD", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+        if (closeHud == null)
+        {
+            Log.Write("  WARNING: IntegrityToolUIComponent.CloseHUD not found;" +
+                      " queueing may fire outside welder mode");
+            return;
+        }
+
+        _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
+        Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
+    }
+
+    private delegate void OriginalCloseHUD(
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self);
+
+    private static void HookedCloseHUD(
+        OriginalCloseHUD original,
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self)
+    {
+        original(self);
+
+        try
+        {
+            IntegrityToolAccess.Release(self);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("releasing the integrity tool component failed", ex);
+        }
+    }
+
+    private delegate void OriginalUpdateUI(
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self,
+        Keen.VRage.DCS.Components.Entity target);
+
+    private static void HookedUpdateUI(
+        OriginalUpdateUI original,
+        Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent self,
+        Keen.VRage.DCS.Components.Entity target)
+    {
+        // Original first: it is what populates the model we are about to rely on.
+        original(self, target);
+
+        try
+        {
+            IntegrityToolAccess.Capture(self);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("capturing the integrity tool component failed", ex);
+        }
     }
 
     private delegate void OriginalSetMapping(ControlCustomizationEngineComponent self, ActionControlMapping mapping);

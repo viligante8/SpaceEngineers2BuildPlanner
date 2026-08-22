@@ -66,10 +66,10 @@ internal static class ComponentWithdrawal
         // Ask the engine what is actually short, rather than recomputing it here. FindMissingItems
         // subtracts what the destination already holds, which is precisely the "I needed 11, took 10"
         // arithmetic the player would otherwise do in their head.
-        Log.Write($"  debug: withdrawal wants {required.Count} item type(s) from {sources.Count} source(s)");
+        Log.Debug($"  debug: withdrawal wants {required.Count} item type(s) from {sources.Count} source(s)");
 
         var missing = FindMissing(destination, required);
-        Log.Write($"  debug: shortfall is {missing.Count} item type(s)");
+        Log.Debug($"  debug: shortfall is {missing.Count} item type(s)");
 
         if (missing.Count == 0)
             return new WithdrawalResult(WithdrawalOutcome.AlreadySatisfied, transferred, missing);
@@ -102,7 +102,7 @@ internal static class ComponentWithdrawal
 
                 if (moved <= 0) continue;
 
-                Log.Write($"  debug: moved {(int)moved} x {want.Item.DisplayName}");
+                Log.Debug($"  debug: moved {(int)moved} x {want.Item.DisplayName}");
                 outstanding -= moved;
                 anyMoved = true;
                 transferred.Add(new ItemAmount(want.Item, moved));
@@ -113,12 +113,23 @@ internal static class ComponentWithdrawal
         // mass limit partway through, so what we moved is not necessarily what we asked for.
         var stillMissing = FindMissing(destination, required);
 
-        WithdrawalOutcome outcome;
-        if (stillMissing.Count == 0) outcome = WithdrawalOutcome.Complete;
-        else if (anyMoved) outcome = WithdrawalOutcome.Partial;
-        else outcome = WithdrawalOutcome.Nothing;
+        var outcome = Classify(stillMissing.Count, anyMoved);
 
         return new WithdrawalResult(outcome, transferred, stillMissing);
+    }
+
+    /// <summary>
+    /// Decide the outcome from the post-transfer shortfall and whether anything moved.
+    ///
+    /// Split out from <see cref="Withdraw"/> purely so it can be unit-tested: everything else in this
+    /// class needs a live InventoryComponent, which cannot be constructed outside a loaded game.
+    /// The shortfall is re-measured by the engine before this is called, so "nothing still missing"
+    /// means complete even if this run moved nothing (the player already had it).
+    /// </summary>
+    internal static WithdrawalOutcome Classify(int stillMissingCount, bool anyMoved)
+    {
+        if (stillMissingCount == 0) return WithdrawalOutcome.Complete;
+        return anyMoved ? WithdrawalOutcome.Partial : WithdrawalOutcome.Nothing;
     }
 
     private static List<ItemAmount> FindMissing(InventoryComponent inventory, IReadOnlyList<ItemAmount> required)

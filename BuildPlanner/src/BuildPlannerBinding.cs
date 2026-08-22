@@ -48,7 +48,7 @@ internal static class BuildPlannerBinding
             if (_context == null) return;
             if (_context.IsActive) return;
 
-            Log.Write("  debug: context was inactive; reactivating");
+            Log.Debug("  debug: context was inactive; reactivating");
 
             // InputContext.Activate() resolves the processor itself through the engine singleton,
             // so it works regardless of which processor instance we captured at bind time.
@@ -121,7 +121,7 @@ internal static class BuildPlannerBinding
     {
         try
         {
-            Log.Write($"  debug: {when} contextActive={_context?.IsActive} layerIndex={_context?.LayerIndex}");
+            Log.Debug($"  debug: {when} contextActive={_context?.IsActive} layerIndex={_context?.LayerIndex}");
         }
         catch
         {
@@ -204,6 +204,7 @@ internal static class BuildPlannerBinding
         var contextDefinition = new InputContextDefinition(actions);
 
         var hostEntity = inputComponent.Entity;
+        _hostEntity = hostEntity;
 
         _controller = new BuildPlannerController(
             new Notifier(ShowNotification),
@@ -390,12 +391,91 @@ internal static class BuildPlannerBinding
         }
     }
 
+    /// <summary>
+    /// The host entity, kept so the notification sink can reach the client session on demand.
+    /// Resolved per call rather than cached: InGameUI is null at the main menu and is replaced on
+    /// every world load.
+    /// </summary>
+    private static Keen.VRage.DCS.Components.Entity? _hostEntity;
+
+    /// <summary>
+    /// The client session's InGameUI, or null when there is no world loaded.
+    ///
+    /// There is no public accessor for it. The route used here is the one vanilla's own notification
+    /// code uses from the inside: InventoryNotificationsSessionComponent is a SessionComponent on the
+    /// CLIENT session and holds the UI in a private readonly field <c>_ui</c> of type InGameUI
+    /// (confirmed by reading Game2.Client.dll metadata, not by assumption). Borrowing that reference
+    /// gives exactly the handle DisplayItem calls ShowNotification on.
+    ///
+    /// The component lives on the client session specifically — InGameUI is Game2.Client, and the
+    /// server session has no UI at all. See notes/client-server-split.md.
+    /// </summary>
+    private static InGameUI? ResolveInGameUI()
+    {
+        try
+        {
+            if (_hostEntity == null)
+            {
+                Log.Write("  notify: no host entity; cannot reach the HUD");
+                return null;
+            }
+
+            var clientSession = GetClientSession(_hostEntity);
+            if (clientSession == null)
+            {
+                Log.Write("  notify: no client session (main menu?); HUD unavailable");
+                return null;
+            }
+
+            // TryGet, never Get: asking a session for a component it does not own throws.
+            var notifications = clientSession.SessionComponents
+                ?.TryGet<Keen.Game2.Client.WorldObjects.Items.InventoryNotificationsSessionComponent>();
+            if (notifications == null)
+            {
+                Log.Write("  notify: InventoryNotificationsSessionComponent not on the client session");
+                return null;
+            }
+
+            var ui = GetPrivateField<InGameUI>(notifications, "_ui");
+            if (ui == null)
+            {
+                Log.Write("  notify: InventoryNotificationsSessionComponent._ui was null");
+                return null;
+            }
+
+            return ui;
+        }
+        catch (Exception ex)
+        {
+            Log.Error("resolving InGameUI failed", ex);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Push a notification to the HUD, and always mirror it to the log.
+    ///
+    /// The log line is kept even once the HUD works: it is the only record available after the fact,
+    /// and it is how every branch of the withdrawal stays observable (CLAUDE.md, "A silent code path
+    /// is a broken code path"). If the HUD cannot be reached the message still reaches the log, so
+    /// the feature degrades rather than disappearing.
+    /// </summary>
     private static void ShowNotification(HudNotification notification)
     {
-        // TODO: route through InGameUI once a reliable handle is available from this call site.
-        // Until then the message still reaches the player through the log, and every caller's
-        // outcome is recorded, so nothing fails silently in diagnosis.
-        Log.Write($"  notify: {notification.Content?.ToString() ?? notification.Name.ToString()}");
+        var text = notification.Content?.ToString() ?? notification.Name.ToString();
+        Log.Write($"  notify: {text}");
+
+        var ui = ResolveInGameUI();
+        if (ui == null) return; // ResolveInGameUI has already reported why.
+
+        try
+        {
+            ui.ShowNotification(notification);
+        }
+        catch (Exception ex)
+        {
+            Log.Error("ShowNotification failed", ex);
+        }
     }
 
     private static T? GetPrivateField<T>(object instance, string fieldName) where T : class

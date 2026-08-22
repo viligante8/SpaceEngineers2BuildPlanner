@@ -45,11 +45,14 @@ internal static class Modifiers
     /// not implemented in this build, so SHIFT is deliberately not mapped here rather than silently
     /// behaving like a plain withdraw — doing the wrong thing quietly is worse than doing nothing.
     /// </remarks>
-    internal static PlannerAction Resolve()
-    {
-        var ctrl = Ctrl;
-        var alt = Alt;
+    internal static PlannerAction Resolve() => Resolve(Ctrl, Alt);
 
+    /// <summary>
+    /// The modifier-to-action mapping itself, with the live input read lifted out so it can be
+    /// unit-tested. <see cref="Resolve()"/> samples the keyboard and delegates here.
+    /// </summary>
+    internal static PlannerAction Resolve(bool ctrl, bool alt)
+    {
         if (alt && ctrl) return PlannerAction.WithdrawTenKeepQueue;
         if (alt) return PlannerAction.Deposit;
         if (ctrl) return PlannerAction.WithdrawKeepQueue;
