@@ -521,21 +521,18 @@ step with MSB3021 while it runs.
 
 ## Releasing
 
-```
-git tag v1.0.0 && git push origin v1.0.0
-```
-
-builds, tests, packages and publishes a GitHub release. A local zip without GitHub:
-
 ```powershell
-.\scripts\package.ps1 -Version 1.0.0
+.\scripts\package.ps1 -Version 1.0.0 -Publish
 ```
 
-That one works with the game open — it builds through a temporary directory rather than `bin\`.
+Tests, packages, and creates a **draft** GitHub release with the zip attached. Drop `-Publish` to
+just build the zip locally.
 
-The release job needs a **self-hosted** runner, because the plugin compiles against Keen's shipped
-assemblies and no GitHub-hosted runner has the game. Setup, and what the artifact does and does not
-contain, are in `../RELEASING.md`.
+Works with the game open — it builds through a temporary directory rather than `bin\`.
+
+There is no CI: the plugin compiles against Keen's shipped assemblies, which are not in this repo,
+so no GitHub-hosted runner can build it. `../RELEASING.md` covers that and what the artifact does
+and does not contain.
 
 ## Background
 

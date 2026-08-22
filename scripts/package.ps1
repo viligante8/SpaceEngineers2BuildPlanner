@@ -3,8 +3,12 @@
     Build and package a Build Planner release.
 
 .DESCRIPTION
-    Produces a versioned zip containing the plugin and its MonoMod/Cecil dependencies, ready to
-    attach to a GitHub release. Used both by a human and by .github/workflows/release.yml.
+    Produces a versioned zip containing the plugin and its MonoMod/Cecil dependencies, and
+    optionally creates the GitHub release with it attached.
+
+    Releases are cut from a developer's machine, not CI. The plugin compiles against the shipped
+    Space Engineers 2 assemblies, which are Keen's and are not in this repository, so a
+    GitHub-hosted runner cannot build the project at all - see RELEASING.md.
 
     Deliberately publishes to an isolated output directory rather than the project's own bin\.
     Two reasons:
@@ -30,17 +34,31 @@
     Where to write the zip. Defaults to dist\ at the repo root.
 
 .PARAMETER SkipTests
-    Skip the unit tests. The release workflow does not pass this.
+    Skip the unit tests. Do not use this for a release.
+
+.PARAMETER Publish
+    After packaging, create the GitHub release and attach the zip, using the gh CLI.
+    Creates a draft unless -Final is also passed, so there is always a chance to look first.
+
+.PARAMETER Final
+    With -Publish, publish the release immediately instead of leaving it as a draft.
 
 .EXAMPLE
     .\scripts\package.ps1 -Version 1.0.0
+    Build a zip into dist\ and stop. Nothing leaves your machine.
+
+.EXAMPLE
+    .\scripts\package.ps1 -Version 1.0.0 -Publish
+    Build, then create a DRAFT GitHub release with the zip attached.
 #>
 [CmdletBinding()]
 param(
     [string]$Version = "0.0.0-dev",
     [string]$GameDir,
     [string]$OutputDir,
-    [switch]$SkipTests
+    [switch]$SkipTests,
+    [switch]$Publish,
+    [switch]$Final
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,6 +139,8 @@ try {
     }
 
     Copy-Item (Join-Path $PSScriptRoot "INSTALL.txt") -Destination $publishDir
+    # MIT requires the notice to travel with the binaries we bundle.
+    Copy-Item (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $publishDir
 
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     $zipPath = Join-Path $OutputDir "BuildPlanner-$Version.zip"
@@ -133,10 +153,44 @@ try {
     Get-ChildItem $publishDir | ForEach-Object { Write-Host ("  " + $_.Name) }
     Write-Host "`n$zipPath ($size KB)"
 
-    # Consumed by the release workflow.
-    if ($env:GITHUB_OUTPUT) {
-        "zip=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-        "version=$Version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+    if ($Publish) {
+        Write-Host "`n== publish to GitHub =="
+
+        if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
+            throw "The gh CLI is not on PATH. Install GitHub CLI, or attach $zipPath to a release by hand."
+        }
+
+        $tag = "v$Version"
+
+        # Reuse the tag if it already exists; gh creates it from HEAD otherwise. Checked up front so
+        # a mistyped version does not silently tag the wrong commit.
+        $existingTag = (& git tag --list $tag) -join ''
+        if ($existingTag) {
+            Write-Host "  using existing tag $tag"
+        }
+        else {
+            Write-Host "  $tag does not exist yet; it will be created from the current commit"
+        }
+
+        $ghArgs = @(
+            "release", "create", $tag, $zipPath,
+            "--title", "Build Planner $Version",
+            "--generate-notes"
+        )
+
+        # Draft by default. Publishing a game plugin is hard to take back once people have it, so
+        # the default leaves it reviewable and -Final is an explicit choice.
+        if (-not $Final) { $ghArgs += "--draft" }
+
+        & gh @ghArgs
+        if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
+
+        if ($Final) { Write-Host "`nPublished $tag." }
+        else { Write-Host "`nDrafted $tag. Review it on GitHub, then publish when you are happy." }
+    }
+    else {
+        Write-Host "`nNot published. Attach it with:"
+        Write-Host "  gh release create v$Version `"$zipPath`" --title `"Build Planner $Version`" --generate-notes --draft"
     }
 }
 finally {
