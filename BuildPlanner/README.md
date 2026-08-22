@@ -62,12 +62,15 @@ BuildPlanner ready.
 | **N** | Withdraw queued components, clear the queue | yes |
 | **CTRL + N** | Withdraw, **keep** the queue (repeat building) | not yet |
 | **ALT + CTRL + N** | Withdraw **×10**, keep the queue | not yet |
-| **ALT + N** | Deposit your inventory into the target | not yet |
+| **ALT + N** | Deposit ore, materials and components into the target (keeps tools) | partly |
 | **SHIFT + N** | Clear the queue without withdrawing | not yet |
 | **SHIFT + CTRL + N** | Dump runtime state to the log (developer tool) | yes |
 
-Right-click only queues while a welder or area welder is active and its block panel is showing — in
-block placement mode the game already uses right-click, so the planner stays out of the way.
+Right-click is only *bound* while a welder or area welder is showing its block panel. The rest of the
+time the mod does not hold the button at all, so the game keeps it for dropping items in the
+inventory screen, removing projections, and placement mode. This has to be done by activating and
+deactivating the input context, not by ignoring the click: an input is consumed by exactly one
+context per frame, so merely declining to act on it still takes it away from the game.
 
 Queueing takes the block's **outstanding** components, not a full recipe: a part-welded block that
 needs 29 more plates queues 29, not 30.

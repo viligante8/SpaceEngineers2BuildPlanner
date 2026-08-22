@@ -50,6 +50,11 @@ internal static class IntegrityToolAccess
             Log.Debug("  debug: captured IntegrityToolUIComponent from UpdateUI");
 
         _current = component;
+
+        // Take right-click only while the welder is actually showing its panel. Outside that the
+        // game needs the button for dropping items and removing projections.
+        if (IsPanelOpen(component)) BuildPlannerBinding.EnableQueueInput();
+        else BuildPlannerBinding.DisableQueueInput();
     }
 
     /// <summary>Forget the component when its scene goes away, so a stale one is never read.</summary>
@@ -58,6 +63,7 @@ internal static class IntegrityToolAccess
         if (component != null && ReferenceEquals(_current, component))
         {
             _current = null;
+            BuildPlannerBinding.DisableQueueInput();
             Log.Debug("  debug: released IntegrityToolUIComponent (removed from scene)");
         }
     }

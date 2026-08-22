@@ -197,11 +197,19 @@ internal static class BuildPlannerBinding
         // With Layer == null, ActivateContext takes its else branch and appends to _activeContexts,
         // and DispatchActions walks every active context. So we observe the same actions alongside
         // the game instead of fighting it for a slot.
-        var actions = secondary != null
-            ? new[] { withdrawAction, secondary }
-            : new[] { withdrawAction };
-
-        var contextDefinition = new InputContextDefinition(actions);
+        // TWO contexts, deliberately.
+        //
+        // Right-click is shared with the game: dropping an item in the inventory screen and removing
+        // a projection are both Mouse::Right. An input is consumed by exactly ONE context per frame
+        // (DisambiguatingControlActivationFilter), so an always-active context holding right-click
+        // steals it from the game everywhere - observed as items refusing to drop and projections
+        // refusing to be removed.
+        //
+        // So the withdraw key lives in a permanently active context, while right-click lives in its
+        // own context that is only active while a welder's block panel is showing. The rest of the
+        // time the game owns right-click completely, because our context is not merely ignoring the
+        // input - it is not there to compete for it.
+        var contextDefinition = new InputContextDefinition(new[] { withdrawAction });
 
         var hostEntity = inputComponent.Entity;
         _hostEntity = hostEntity;
@@ -222,12 +230,59 @@ internal static class BuildPlannerBinding
 
         if (secondary != null)
         {
-            _context.SetTrigger(secondary, () => _controller!.OnSecondaryAction());
-            Log.Write("  bound queue to ToolSecondaryAction (Mouse::Right)");
+            // Created but NOT activated: IntegrityToolAccess turns it on when a welder starts showing
+            // its block panel and off again when it stops.
+            _queueContext = new InputContext(new InputContextDefinition(new[] { secondary }));
+            _queueContext.SetTrigger(secondary, () => _controller!.OnSecondaryAction());
+            Log.Write("  bound queue to ToolSecondaryAction (Mouse::Right), active only with a welder out");
         }
         else
         {
             Log.Write("  WARNING: ToolSecondaryAction not found; queueing not bound");
+        }
+    }
+
+    /// <summary>Right-click context. Only active while a welder is showing its block panel.</summary>
+    private static InputContext? _queueContext;
+
+    /// <summary>
+    /// Claim right-click, because a welder is out and aiming at something.
+    ///
+    /// Idempotent: called from the tool's UpdateUI, which runs constantly while aiming.
+    /// </summary>
+    internal static void EnableQueueInput()
+    {
+        try
+        {
+            if (_queueContext == null || _queueContext.IsActive) return;
+
+            _queueContext.Activate();
+            Log.Debug("  debug: right-click claimed (welder active)");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("activating the queue input context failed", ex);
+        }
+    }
+
+    /// <summary>
+    /// Release right-click back to the game.
+    ///
+    /// Without this the mod holds Mouse::Right everywhere - the inventory screen cannot drop items
+    /// and projections cannot be removed, because our context consumed the input first.
+    /// </summary>
+    internal static void DisableQueueInput()
+    {
+        try
+        {
+            if (_queueContext == null || !_queueContext.IsActive) return;
+
+            _queueContext.Deactivate();
+            Log.Debug("  debug: right-click released back to the game");
+        }
+        catch (Exception ex)
+        {
+            Log.Error("deactivating the queue input context failed", ex);
         }
     }
 

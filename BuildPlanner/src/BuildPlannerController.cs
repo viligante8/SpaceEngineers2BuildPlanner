@@ -259,8 +259,17 @@ internal sealed class BuildPlannerController
             // IterateItemsReverse yields (ItemStack Stack, int Index) pairs.
             foreach (var (stack, _) in source.IterateItemsReverse())
             {
-                if (stack.Definition != null && !toMove.Contains(stack.Definition))
-                    toMove.Add(stack.Definition);
+                if (stack.Definition == null || toMove.Contains(stack.Definition)) continue;
+
+                if (!IsBuildMaterial(stack.Definition))
+                {
+                    // Deposit used to empty everything, tools included - it cheerfully posted the
+                    // player's welder and grinder into a container. Reported in game.
+                    Log.Debug($"  debug: keeping '{stack.Definition.DisplayName}' (not a build material)");
+                    continue;
+                }
+
+                toMove.Add(stack.Definition);
             }
         }
         catch (Exception ex)
@@ -291,6 +300,24 @@ internal sealed class BuildPlannerController
         }
 
         _notifier.Deposited(moved);
+    }
+
+    /// <summary>
+    /// Whether an item is something a builder wants to hand over to storage.
+    /// </summary>
+    /// <remarks>
+    /// <c>ItemDefinition.Type</c> is documented as "the type(s) this item belongs to" and its enum
+    /// <c>ItemTypes</c> is Ore, Material, Component, Item, Consumable, Datapad (plus PresetNone and
+    /// PresetAll). Deposit takes the three that are build inputs and leaves the rest, so tools,
+    /// consumables and datapads stay on the player.
+    ///
+    /// An allow-list, not a deny-list: a new item type should default to staying in the player's
+    /// inventory. Wrongly depositing a tool is far worse than wrongly keeping some ore.
+    /// </remarks>
+    private static bool IsBuildMaterial(ItemDefinition item)
+    {
+        const ItemTypes BuildInputs = ItemTypes.Ore | ItemTypes.Material | ItemTypes.Component;
+        return (item.Type & BuildInputs) != 0;
     }
 
     /// <summary>
