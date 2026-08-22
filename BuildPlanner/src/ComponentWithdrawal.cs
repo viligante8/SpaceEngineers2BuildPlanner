@@ -105,8 +105,16 @@ internal static class ComponentWithdrawal
                 Log.Debug($"  debug: moved {(int)moved} x {want.Item.DisplayName}");
                 outstanding -= moved;
                 anyMoved = true;
-                transferred.Add(new ItemAmount(want.Item, moved));
             }
+
+            // One entry per item type, not one per container it came from.
+            //
+            // A withdrawal drains as many conveyor-reachable inventories as it needs, and recording
+            // each transfer separately made the report read "withdrew 210x Steel Plate, 29x Steel
+            // Plate" when 239 plates had arrived from two containers. Since `outstanding` only ever
+            // decreases by what actually moved, the difference is the total for this item.
+            var takenForItem = want.Amount - outstanding;
+            if (takenForItem > 0) transferred.Add(new ItemAmount(want.Item, takenForItem));
         }
 
         // Re-ask the engine rather than trusting our own subtraction: the destination may have hit a
