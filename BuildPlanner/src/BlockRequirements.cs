@@ -69,8 +69,23 @@ internal static class BlockRequirements
                 remaining.Add(new ItemAmount(want.Item, outstanding));
             }
 
-            Log.Debug($"  debug: '{definition.UIData?.Name}' at {block.EffectiveBuildProgress:P0}" +
-                      $" still needs {remaining.Count} item type(s)");
+            // Full accounting, always logged while this is under investigation.
+            //
+            // GetItemPresenceForCurrentBuildProgress is linear - ceil(progress * TotalItemAmount) -
+            // so a block at 70% should still owe roughly 30% of its components. In game it reported
+            // zero outstanding at 70%, which contradicts that. Reading the code did not explain it,
+            // so log every input to the subtraction and let one run settle it.
+            Log.Write($"  remainder for '{definition.UIData?.Name}':" +
+                      $" effectiveProgress={block.EffectiveBuildProgress:F3}" +
+                      $" buildProgress={block.BuildProgress:F3}" +
+                      $" totalItemAmount={(int)definition.TotalItemAmount}" +
+                      $" optionalItemAmount={(int)definition.OptionalItemAmount}" +
+                      $" minFunctional={definition.MinFunctionalBuildProgress:F3}" +
+                      $" definitionItemTypes={(definition.Items.IsDefaultOrEmpty ? 0 : definition.Items.Length)}");
+
+            LogItems("    total ", total);
+            LogItems("    stored", stored);
+            LogItems("    needs ", remaining);
 
             return remaining;
         }
@@ -81,6 +96,25 @@ internal static class BlockRequirements
             Log.Error($"computing the remainder for '{definition.UIData?.Name}' failed; using the full recipe", ex);
             return FromDefinition(definition);
         }
+    }
+
+    /// <summary>Log an item list compactly. Temporary, for the remainder investigation.</summary>
+    private static void LogItems(string label, List<ItemAmount> items)
+    {
+        if (items.Count == 0)
+        {
+            Log.Write($"  {label}: (none)");
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        foreach (var item in items)
+        {
+            if (sb.Length > 0) sb.Append(", ");
+            sb.Append((int)item.Amount).Append(" x ").Append(item.Item?.DisplayName.ToString() ?? "?");
+        }
+
+        Log.Write($"  {label}: {sb}");
     }
 
     /// <summary>The block's complete recipe, for projections and for error fallback.</summary>

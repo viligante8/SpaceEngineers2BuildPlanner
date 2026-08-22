@@ -86,6 +86,13 @@ internal sealed class BuildPlannerController
         {
             BuildPlannerBinding.LogContextState("on right-click:");
 
+            if (BuildPlannerBinding.IsGamePaused())
+            {
+                // No notification: the HUD is behind the menu and the player did not mean to act.
+                Log.Debug("  debug: game is paused; ignoring right-click");
+                return;
+            }
+
             // Primary source: the blocks the game's own tooltip is showing. This is the same data
             // that drives the "you need N x Steel Plate" panel, so what gets queued is by definition
             // what the player is looking at. See IntegrityToolAccess for why the two earlier routes
@@ -122,6 +129,12 @@ internal sealed class BuildPlannerController
     {
         try
         {
+            if (BuildPlannerBinding.IsGamePaused())
+            {
+                Log.Debug("  debug: game is paused; ignoring the withdraw key");
+                return;
+            }
+
             switch (Modifiers.Resolve())
             {
                 case PlannerAction.Withdraw:

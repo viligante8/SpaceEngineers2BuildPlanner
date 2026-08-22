@@ -318,6 +318,34 @@ internal static class BuildPlannerBinding
         }
     }
 
+    /// <summary>
+    /// Whether the game is paused (escape menu open).
+    ///
+    /// Reported in game: with a welder equipped and the escape menu open, right-click still queued
+    /// blocks. The input context is still active there — the tool's UpdateUI simply stops running, so
+    /// nothing ever deactivated it — and a paused game must not accept build-planner actions.
+    ///
+    /// <c>WorldSessionComponent.Pause</c> is a public PauseManager with a public IsPaused.
+    /// </summary>
+    internal static bool IsGamePaused()
+    {
+        try
+        {
+            if (_hostEntity == null) return false;
+
+            var scene = _hostEntity.Scene?.UserObject as GameCoreScene;
+            var world = scene?.GameClient?.Get<WorldSessionComponent>();
+
+            return world?.Pause?.IsPaused ?? false;
+        }
+        catch (Exception ex)
+        {
+            // Fail open: a broken pause check must not disable the mod outright.
+            Log.Error("pause check failed", ex);
+            return false;
+        }
+    }
+
     private static Session? GetSession(Keen.VRage.DCS.Components.Entity hostEntity)
     {
         if (hostEntity == null) return null;
