@@ -127,6 +127,10 @@ internal sealed class BuildPlannerController
                 case PlannerAction.Deposit:
                     Deposit();
                     break;
+                case PlannerAction.Diagnose:
+                    Diagnostics.DumpAll(_queue, _clientSession(), _session());
+                    _notifier.Info("Build Planner: state written to the log");
+                    break;
             }
         }
         catch (Exception ex)

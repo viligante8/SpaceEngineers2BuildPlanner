@@ -21,7 +21,16 @@ internal enum PlannerAction
     WithdrawTenKeepQueue,
 
     /// <summary>ALT: deposit the player's inventory into the target.</summary>
-    Deposit
+    Deposit,
+
+    /// <summary>
+    /// SHIFT: dump runtime state to the log.
+    ///
+    /// The nearest thing to a breakpoint available here - a plugin cannot attach a debugger, and a
+    /// game restart plus world load costs about five minutes, so being able to snapshot live state
+    /// at the exact moment something looks wrong is worth a keybind. SHIFT was already unmapped.
+    /// </summary>
+    Diagnose
 }
 
 /// <summary>
@@ -45,14 +54,18 @@ internal static class Modifiers
     /// not implemented in this build, so SHIFT is deliberately not mapped here rather than silently
     /// behaving like a plain withdraw — doing the wrong thing quietly is worse than doing nothing.
     /// </remarks>
-    internal static PlannerAction Resolve() => Resolve(Ctrl, Alt);
+    internal static PlannerAction Resolve() => Resolve(Ctrl, Alt, Shift);
 
     /// <summary>
     /// The modifier-to-action mapping itself, with the live input read lifted out so it can be
     /// unit-tested. <see cref="Resolve()"/> samples the keyboard and delegates here.
     /// </summary>
-    internal static PlannerAction Resolve(bool ctrl, bool alt)
+    internal static PlannerAction Resolve(bool ctrl, bool alt, bool shift = false)
     {
+        // Checked first: a diagnostic dump must never be mistaken for a withdrawal, and previously
+        // SHIFT was ignored entirely, so SHIFT+N silently performed a plain withdraw.
+        if (shift) return PlannerAction.Diagnose;
+
         if (alt && ctrl) return PlannerAction.WithdrawTenKeepQueue;
         if (alt) return PlannerAction.Deposit;
         if (ctrl) return PlannerAction.WithdrawKeepQueue;

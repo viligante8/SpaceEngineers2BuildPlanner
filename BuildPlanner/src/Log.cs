@@ -18,6 +18,9 @@ internal static class Log
 
     private static readonly object Gate = new object();
 
+    /// <summary>The log file path, so diagnostics can find sibling files (queries.txt, quiet).</summary>
+    internal static string PathForDiagnostics => LogPath;
+
     internal static void Write(string message)
     {
         try
@@ -49,10 +52,11 @@ internal static class Log
     /// unconditionally (CLAUDE.md, "A silent code path is a broken code path") — this only silences
     /// the supporting detail beneath those reports.
     ///
-    /// Enable by creating the file:
-    ///     %APPDATA%\SpaceEngineers2\BuildPlanner\debug
-    /// A file flag rather than a launch argument, so it can be toggled without editing Steam options
-    /// and without a rebuild. Read once per run.
+    /// **On by default.** A game restart plus world load costs about five minutes, so a run that
+    /// fails to record something needed is far more expensive than a large log file. Log first, trim
+    /// later. Disable by creating the file:
+    ///     %APPDATA%\SpaceEngineers2\BuildPlanner\quiet
+    /// Read once per run.
     /// </summary>
     internal static void Debug(string message)
     {
@@ -70,11 +74,12 @@ internal static class Log
         try
         {
             var dir = Path.GetDirectoryName(LogPath);
-            return dir != null && File.Exists(Path.Combine(dir, "debug"));
+            // Verbose unless explicitly silenced. Failing to probe leaves it ON, deliberately.
+            return dir == null || !File.Exists(Path.Combine(dir, "quiet"));
         }
         catch
         {
-            return false;
+            return true;
         }
     }
 }

@@ -50,6 +50,27 @@ public class ModifiersTests
         Assert.NotEqual(Modifiers.Resolve(ctrl: false, alt: true), both);
     }
 
+    /// <summary>
+    /// SHIFT dumps diagnostics and must never fall through to a withdrawal. Before this existed,
+    /// Resolve ignored SHIFT entirely, so SHIFT+N silently performed a plain withdraw.
+    /// </summary>
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void Shift_AlwaysDiagnoses_RegardlessOfOtherModifiers(bool ctrl, bool alt)
+    {
+        Assert.Equal(PlannerAction.Diagnose, Modifiers.Resolve(ctrl, alt, shift: true));
+    }
+
+    [Fact]
+    public void WithoutShift_NeverDiagnoses()
+    {
+        Assert.NotEqual(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: false, alt: false, shift: false));
+        Assert.NotEqual(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: true, alt: true, shift: false));
+    }
+
     /// <summary>Every modifier combination maps to exactly one action - no combination is unhandled.</summary>
     [Theory]
     [InlineData(false, false)]
