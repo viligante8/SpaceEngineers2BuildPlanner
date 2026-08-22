@@ -132,40 +132,13 @@ internal static class ComponentWithdrawal
         return anyMoved ? WithdrawalOutcome.Partial : WithdrawalOutcome.Nothing;
     }
 
+    /// <summary>
+    /// Delegates to <see cref="InventoryShortfall"/>, which production also uses.
+    ///
+    /// Kept as a named method rather than inlined at both call sites: the two calls below mean
+    /// different things (the shortfall before transferring, and the shortfall after), and the second
+    /// exists specifically because the destination may have hit a mass limit partway through.
+    /// </summary>
     private static List<ItemAmount> FindMissing(InventoryComponent inventory, IReadOnlyList<ItemAmount> required)
-    {
-        var wanted = new ItemAmount[required.Count];
-        for (var i = 0; i < required.Count; i++) wanted[i] = required[i];
-
-        var missing = new List<ItemAmount>();
-
-        // FindMissingItems writes into a BufferReference, which is a ref struct over a Buffer<T>.
-        // BufferReference's constructor is internal, so the buffer must be allocated first and its
-        // public GetReference() used. Worst case is every requested type missing in full, so capacity
-        // equals the request count. Buffer<T> owns native memory — dispose it.
-        var buffer = new Keen.VRage.Library.Memory.Buffer<ItemAmount>(
-            required.Count, Keen.VRage.Library.Memory.Allocator.Heap);
-
-        try
-        {
-            inventory.FindMissingItems(wanted, buffer.GetReference());
-
-            for (var i = 0; i < buffer.Count; i++)
-            {
-                var entry = buffer[i];
-                if (entry.Amount > 0) missing.Add(entry);
-            }
-        }
-        catch (Exception ex)
-        {
-            Log.Error("FindMissingItems failed", ex);
-            return new List<ItemAmount>();
-        }
-        finally
-        {
-            buffer.Dispose();
-        }
-
-        return missing;
-    }
+        => InventoryShortfall.Find(inventory, required);
 }

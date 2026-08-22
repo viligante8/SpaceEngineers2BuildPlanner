@@ -67,8 +67,40 @@ internal sealed class Notifier
     internal void NothingAvailable(IReadOnlyList<ItemAmount> missing) =>
         Warning($"Build Planner: could not find {Summarize(missing)}");
 
+    internal void Producing(IReadOnlyList<ProductionOrder> orders) =>
+        Info($"Build Planner: producing {SummarizeOrders(orders)}");
+
+    internal void ProducingPartial(IReadOnlyList<ProductionOrder> orders, IReadOnlyList<ItemAmount> unproducible) =>
+        Warning($"Build Planner: producing {SummarizeOrders(orders)} — cannot make {Summarize(unproducible)}");
+
+    internal void CannotProduce(IReadOnlyList<ItemAmount> unproducible) =>
+        Warning($"Build Planner: nothing in reach can make {Summarize(unproducible)}");
+
+    internal void NoConverter() =>
+        Warning("Build Planner: no assembler or refinery connected to that block");
+
+    internal void AlreadyHaveEverythingToProduce() =>
+        Info("Build Planner: you already have everything queued; nothing to produce");
+
     internal void Deposited(int stacks) =>
         Info(stacks > 0 ? $"Build Planner: deposited {stacks} stack(s)" : "Build Planner: nothing to deposit");
+
+    /// <summary>
+    /// Renders production orders as amounts, not run counts.
+    ///
+    /// The player queued blocks and thinks in components — "producing 4 runs" is meaningless to
+    /// them, while "producing 120x Steel Plate" is the number they can compare against the block
+    /// panel. The run count stays in the log, where it is a diagnostic.
+    /// </summary>
+    private static string SummarizeOrders(IReadOnlyList<ProductionOrder> orders)
+    {
+        if (orders == null || orders.Count == 0) return "nothing";
+
+        var items = new List<ItemAmount>(orders.Count);
+        foreach (var order in orders) items.Add(new ItemAmount(order.Item, order.Amount));
+
+        return Summarize(items);
+    }
 
     /// <summary>Renders item amounts compactly, capped so a long list cannot flood the HUD.</summary>
     private static string Summarize(IReadOnlyList<ItemAmount> items)

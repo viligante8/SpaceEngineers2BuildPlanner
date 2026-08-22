@@ -23,8 +23,14 @@ internal enum PlannerAction
     /// <summary>ALT: deposit the player's inventory into the target.</summary>
     Deposit,
 
+    /// <summary>SHIFT: queue the missing components for production at a connected assembler.</summary>
+    Produce,
+
+    /// <summary>SHIFT + CTRL: produce tenfold amounts.</summary>
+    ProduceTen,
+
     /// <summary>
-    /// SHIFT: empty the queue without withdrawing anything.
+    /// SHIFT + ALT: empty the queue without withdrawing anything.
     ///
     /// Previously there was no way to do this at all - the queue could only be cleared as a side
     /// effect of a successful withdrawal, so a player who queued the wrong block was stuck with it.
@@ -32,13 +38,12 @@ internal enum PlannerAction
     ClearQueue,
 
     /// <summary>
-    /// SHIFT + CTRL: dump runtime state to the log.
+    /// SHIFT + ALT + CTRL: dump runtime state to the log.
     ///
     /// The nearest thing to a breakpoint available here - a plugin cannot attach a debugger, and a
     /// game restart plus world load costs about five minutes, so snapshotting live state at the exact
-    /// moment something looks wrong is worth a binding. It sits behind the two-modifier combination
-    /// because it is a developer tool: clearing the queue is the interaction players actually want on
-    /// the simpler chord.
+    /// moment something looks wrong is worth a binding. It sits behind the longest chord because it
+    /// is a developer tool.
     /// </summary>
     Diagnose
 }
@@ -60,9 +65,8 @@ internal static class Modifiers
     /// Map the currently-held modifiers onto an action.
     /// </summary>
     /// <remarks>
-    /// SHIFT variants in SE1 trigger *production* (queue components at an assembler). Production is
-    /// not implemented in this build, so SHIFT is deliberately not mapped here rather than silently
-    /// behaving like a plain withdraw — doing the wrong thing quietly is worse than doing nothing.
+    /// SHIFT is production, matching SE1: SHIFT produces, SHIFT+CTRL produces tenfold. Clearing the
+    /// queue and the diagnostic dump were moved onto the ALT variants to free those two chords.
     /// </remarks>
     internal static PlannerAction Resolve() => Resolve(Ctrl, Alt, Shift);
 
@@ -72,10 +76,18 @@ internal static class Modifiers
     /// </summary>
     internal static PlannerAction Resolve(bool ctrl, bool alt, bool shift = false)
     {
-        // SHIFT combinations are checked first: neither clearing nor a diagnostic dump may ever be
-        // mistaken for a withdrawal. Before SHIFT was handled at all it was ignored entirely, so
-        // SHIFT+N silently performed a plain withdraw.
-        if (shift) return ctrl ? PlannerAction.Diagnose : PlannerAction.ClearQueue;
+        // SHIFT combinations are checked first: nothing under SHIFT may ever be mistaken for a
+        // withdrawal. Before SHIFT was handled at all it was ignored entirely, so SHIFT+N silently
+        // performed a plain withdraw.
+        //
+        // ALT is checked before CTRL inside the SHIFT branch, so SHIFT+ALT+CTRL reaches Diagnose
+        // rather than degrading into ProduceTen. Production enqueues real work at a real assembler,
+        // so an accidental Diagnose chord must not start crafting.
+        if (shift)
+        {
+            if (alt) return ctrl ? PlannerAction.Diagnose : PlannerAction.ClearQueue;
+            return ctrl ? PlannerAction.ProduceTen : PlannerAction.Produce;
+        }
 
         if (alt && ctrl) return PlannerAction.WithdrawTenKeepQueue;
         if (alt) return PlannerAction.Deposit;

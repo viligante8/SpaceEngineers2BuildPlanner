@@ -51,19 +51,62 @@ public class ModifiersTests
     }
 
     [Fact]
-    public void Shift_ClearsTheQueue()
+    public void Shift_Produces()
     {
-        Assert.Equal(PlannerAction.ClearQueue, Modifiers.Resolve(ctrl: false, alt: false, shift: true));
+        Assert.Equal(PlannerAction.Produce, Modifiers.Resolve(ctrl: false, alt: false, shift: true));
     }
 
     [Fact]
-    public void ShiftCtrl_Diagnoses()
+    public void ShiftCtrl_ProducesTenfold()
     {
-        Assert.Equal(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: true, alt: false, shift: true));
+        Assert.Equal(PlannerAction.ProduceTen, Modifiers.Resolve(ctrl: true, alt: false, shift: true));
+    }
+
+    [Fact]
+    public void ShiftAlt_ClearsTheQueue()
+    {
+        Assert.Equal(PlannerAction.ClearQueue, Modifiers.Resolve(ctrl: false, alt: true, shift: true));
+    }
+
+    [Fact]
+    public void ShiftAltCtrl_Diagnoses()
+    {
+        Assert.Equal(PlannerAction.Diagnose, Modifiers.Resolve(ctrl: true, alt: true, shift: true));
     }
 
     /// <summary>
-    /// Neither SHIFT action may fall through to a withdrawal or a deposit. Before SHIFT was handled,
+    /// The developer chord must not start production. SHIFT+ALT+CTRL differs from SHIFT+CTRL
+    /// (ProduceTen) by ALT alone, so if the SHIFT branch ever tested CTRL before ALT, reaching for
+    /// the diagnostic dump would instead enqueue tenfold work at a real assembler - consuming the
+    /// player's ore. The ordering is load-bearing, so it is pinned here.
+    /// </summary>
+    [Fact]
+    public void DiagnoseChord_DoesNotProduce()
+    {
+        var diagnose = Modifiers.Resolve(ctrl: true, alt: true, shift: true);
+
+        Assert.NotEqual(PlannerAction.Produce, diagnose);
+        Assert.NotEqual(PlannerAction.ProduceTen, diagnose);
+    }
+
+    /// <summary>
+    /// Production must never be reachable without SHIFT. The plain and CTRL chords move real items
+    /// into the player's hands; silently enqueueing assembler work instead would be the same class
+    /// of silent wrong behaviour that made SHIFT+N perform a withdraw before SHIFT was handled.
+    /// </summary>
+    [Fact]
+    public void WithoutShift_NeverProduces()
+    {
+        foreach (var (ctrl, alt) in new[] { (false, false), (true, false), (false, true), (true, true) })
+        {
+            var action = Modifiers.Resolve(ctrl, alt, shift: false);
+            Assert.NotEqual(PlannerAction.Produce, action);
+            Assert.NotEqual(PlannerAction.ProduceTen, action);
+        }
+    }
+
+    /// <summary>
+    /// No SHIFT action may fall through to a withdrawal or a deposit. Before SHIFT was handled,
     /// Resolve ignored it entirely and SHIFT+N silently performed a plain withdraw - the exact class
     /// of silent wrong behaviour this feature cannot afford, since withdrawals move real items.
     /// </summary>

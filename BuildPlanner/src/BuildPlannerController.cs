@@ -13,10 +13,12 @@ namespace BuildPlanner;
 /// Drives the Build Planner: turns middle-click (+ modifiers) into queue and withdrawal operations.
 ///
 /// Reproduces the SE1 Build Planner control scheme documented in notes/build-planner-ux-spec.md:
-///   middle-click             withdraw queued components, clear queue
-///   CTRL + middle-click      withdraw, keep queue
+///   middle-click              withdraw queued components, clear queue
+///   CTRL + middle-click       withdraw, keep queue
 ///   ALT + CTRL + middle-click withdraw x10, keep queue
-///   ALT + middle-click       deposit inventory
+///   ALT + middle-click        deposit inventory
+///   SHIFT + middle-click      produce queued components at a connected assembler
+///   SHIFT + CTRL + middle-click produce x10
 ///
 /// Queueing stays explicit, as in SE1: blocks never enter the queue on their own.
 /// </summary>
@@ -146,6 +148,12 @@ internal sealed class BuildPlannerController
                 case PlannerAction.WithdrawTenKeepQueue:
                     Withdraw(multiplier: 10, keepQueue: true);
                     break;
+                case PlannerAction.Produce:
+                    Produce(multiplier: 1);
+                    break;
+                case PlannerAction.ProduceTen:
+                    Produce(multiplier: 10);
+                    break;
                 case PlannerAction.Deposit:
                     Deposit();
                     break;
@@ -233,6 +241,93 @@ internal sealed class BuildPlannerController
 
             case WithdrawalOutcome.Nothing:
                 _notifier.NothingAvailable(result.StillMissing);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// SHIFT: queue the components the player is short of at a reachable assembler.
+    ///
+    /// **The queue is never cleared here, on any path.** Production only *starts* the components; the
+    /// player still has to come back and withdraw them once they exist. Clearing on produce would
+    /// leave them with an assembler full of parts and no record of what they were for — and unlike a
+    /// withdrawal, there is nothing in their inventory afterwards to reconstruct it from.
+    ///
+    /// Sub-components are not this method's problem. Enqueueing a Steel Plate recipe at an assembler
+    /// that has no iron makes the engine request ingots from any connected converter that can make
+    /// them, which in turn requests ore — see <see cref="ComponentProduction"/> for the verified
+    /// chain. This asks only for the top-level components the queued blocks need.
+    /// </summary>
+    private void Produce(int multiplier)
+    {
+        if (_queue.Count == 0)
+        {
+            _notifier.NothingQueued();
+            return;
+        }
+
+        var session = _session();
+        if (session == null)
+        {
+            _notifier.Warning("Build Planner: no active session");
+            return;
+        }
+
+        var character = PlayerAccess.GetLocalCharacter(session);
+        if (character == null)
+        {
+            _notifier.Warning("Build Planner: could not find your character");
+            return;
+        }
+
+        // The player's inventory is the yardstick, not a destination: production is measured against
+        // what they already carry so the same components are not made twice. Nothing is moved here.
+        var carried = PlayerAccess.GetCharacterInventory(character, session);
+        if (carried == null)
+        {
+            _notifier.Warning("Build Planner: could not find your inventory");
+            return;
+        }
+
+        var target = GetAimedEntity(character);
+        if (target == null)
+        {
+            _notifier.NoTarget();
+            return;
+        }
+
+        var converters = InventorySources.CollectConvertersFrom(target);
+        if (converters.Count == 0)
+        {
+            _notifier.NoConverter();
+            return;
+        }
+
+        var required = _queue.GetRequiredComponents(multiplier);
+        var result = ComponentProduction.Produce(carried, converters, required);
+
+        switch (result.Outcome)
+        {
+            case ProductionOutcome.AlreadySatisfied:
+                _notifier.AlreadyHaveEverythingToProduce();
+                break;
+
+            case ProductionOutcome.Complete:
+                _notifier.Producing(result.Enqueued);
+                break;
+
+            case ProductionOutcome.Partial:
+                _notifier.ProducingPartial(result.Enqueued, result.Unproducible);
+                break;
+
+            case ProductionOutcome.Nothing:
+                _notifier.CannotProduce(result.Unproducible);
+                break;
+
+            case ProductionOutcome.NoConverter:
+                // Reachable even though the count was checked above: Produce re-checks its own
+                // arguments, and a converter list that emptied in between must still report itself.
+                _notifier.NoConverter();
                 break;
         }
     }
