@@ -103,6 +103,32 @@ button, and that is the regression to watch for.
 If one right-click ever queues two blocks, the press de-duplication in `BlockMenuAccess` has failed;
 the panel attaches its handler twice (see `notes/build-planner-api.md`).
 
+**Test 6 — the terminal panel (NEW, never yet run).** Queue two or three blocks, then walk up to an
+assembler and open its terminal. Expect a "Build Planner" box **bottom-right**, listing one icon per
+queued block.
+
+```
+  hook installed on TerminalScreen.InitializeComponent
+  hook installed on TerminalScreenViewModel.BuildPlannerBlock_ScheduleAll
+  terminal[attach]: revealed the shipped build planner panel
+  terminal[datacontext]: bound the planner panel to BuildPlannerData (3 block(s) queued)
+```
+
+Then exercise the four buttons — each logs a `panel:` line naming what it did:
+
+- **Produce** → same result as `SHIFT+N`, and **the queue must still be there afterwards** (this mod
+  deliberately does not clear on produce; Keen's version cleared unconditionally)
+- a block's **produce** → only that block's components enqueued
+- a block's **remove** → that block gone from the panel *and* from the next withdrawal
+- **Clear** → empty panel, and `N` afterwards reports nothing queued
+
+The panel shows at most **ten** blocks by design; with more queued the log says
+`showing 10 of N queued block(s)`.
+
+Two things could not be settled by reading and the log will disambiguate: which pass finds the panel
+(`init`, `attach` or `datacontext`), and whether bottom-right anchoring lands sensibly at this
+resolution. If it renders badly, the Grid's alignment and margin are a one-line change.
+
 ## Read before touching plugin code
 
 1. `notes/client-server-split.md` — **the** critical VRAGE3 fact. Two sessions run in-process, both
@@ -118,9 +144,32 @@ placement-mode and pause guards, and HUD notifications have all been exercised i
 
 Nothing is known broken. What is left is deliberate:
 
-1. **No queue UI.** The engine's own build planner screen cannot be driven -
-   `BuildPlannerData` never replicates to the client, so the terminal cannot display it
-   (`notes/build-planner-api.md`). Building our own G-menu affordance was considered and deferred.
+1. ~~**No queue UI.**~~ **Superseded 2026-08-22 — and the old claim here was wrong.** This said the
+   engine's build planner screen "cannot be driven" because `BuildPlannerData` "never replicates to
+   the client". Both halves were mistaken, and the real answer is better: Keen's terminal panel is
+   **shipped complete** and merely switched off. `TerminalPlannerPanel` reveals it, feeds it the
+   mirrored queue, and detours its four buttons onto `BuildPlannerController` — the shipped verbs
+   behind them are half-built (their produce path needs a production screen open, uses each block's
+   full recipe, and returns a success flag that cannot be false).
+
+   **Confirmed rendering in game 2026-08-22:** a vertical icon list on the right of the terminal,
+   growing upward. Plain, and it overlaps the scroll bar — Keen's `(WIP Pos)` label was honest.
+   Queueing, live refresh, the ten-item cap, and Clear all confirmed working. Remove is
+   **right-click on a block icon** (one button, dispatched by mouse button — matches SE1).
+
+   Three defects that run found are **fixed and re-verified in game 2026-08-22**:
+
+   - *Produce reported "no assembler connected" at a working assembler* — a client-vs-server entity
+     mistake, reverted. Now: `3 item converter(s) conveyor-reachable from
+     'CargoContainer750_ServerComposition'` followed by real recipes at `Smelter250_ServerComposition`.
+     The `_ServerComposition` suffix is the evidence the right half of the split is being used.
+   - *Withdrawal left the panel showing blocks it had already cleared* — `BuildPlannerQueue.Changed`
+     now drives the mirror from the mutators. Confirmed by a complete withdrawal followed by
+     `bound the planner panel to BuildPlannerData (0 block(s) queued)`, which previously read 5.
+   - *Each queued block triggered ~2N+1 panel rebuilds* — both layers batch; the cascade is gone
+     from the log.
+
+   Right-click-to-remove confirmed: `panel: removed 'Hinge' (queue index 0, 0 left)`.
 2. **Multiplayer is unverified.** Transfers run against the server session in-process.
 3. **Queue range is the welder's reach** - a deliberate decision with the reasoning in the README.
 
@@ -128,8 +177,14 @@ Nothing is known broken. What is left is deliberate:
 
 This is a plugin bound to method signatures and private field names. The startup log names every
 hook it installs; a missing one is the first thing to check. The private members relied on are
-`IntegrityToolUIComponent._interactedEntityProvider`, `._model`, `._screen`, `._playerData`, and
-`InventoryNotificationsSessionComponent._ui`.
+`IntegrityToolUIComponent._interactedEntityProvider`, `._model`, `._screen`, `._playerData`,
+`InventoryNotificationsSessionComponent._ui`, and `TerminalScreenViewModel._buildPlannerData`.
+
+The terminal panel additionally depends on two things Keen could change without touching any
+signature: the `LayoutTimer` label `"Terminal.BuildPlanner"` (the only handle on a Grid with no
+`x:Name`), and that Grid still being hidden by a literal `IsVisible = false`. If Keen ever finishes
+the panel themselves, the reveal becomes a no-op and the log says `planner panel already visible` —
+which is the good outcome, not a failure.
 
 ## Debugging tools
 

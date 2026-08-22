@@ -339,10 +339,181 @@ the window — making it look like only serialization touched it. **When scannin
 exclude the type's own nested types before truncating**, or the answer hides behind its own
 boilerplate.
 
-**Still unverified:** whether an already-open terminal refreshes (`UpdateBuildPlannerBlocks` is a
-`PropertyChanged` handler and `List.Add` raises no event), and what the second parameter of
-`AddPlannedBlock(CubeBlockDefinition, int)` means — count or index. The mirror writes to the
-`PlannedBlocks` list directly for that reason.
+**Unverified when this was written**, both since settled: whether an already-open terminal refreshes
+(`UpdateBuildPlannerBlocks` is a `PropertyChanged` handler and `List.Add` raises no event), and what
+the second parameter of `AddPlannedBlock(CubeBlockDefinition, int)` means — count or index.
+
+*Answers:* the second parameter is a **count**, defaulting to 1
+(`AddPlannedBlock(CubeBlockDefinition block, int count = 1)`), and both mutators end in
+`OnPropertyChanged("PlannedBlocks")`. An open terminal **does** refresh live — but only because this
+mod subscribes to that notification itself; nothing in the shipping game ever did. Confirmed in game
+2026-08-22, with the panel's list tracking each queued block as it was added.
+
+## The terminal's build planner panel is complete but switched off (2026-08-22)
+
+**The UI is already built.** `TerminalScreen.axaml` contains the whole panel; Keen did not leave it
+to be written. Decompiled from `Game2.Client.dll` (`ilspycmd -t
+Keen.Game2.Client.UI.TerminalScreen.TerminalScreen`), the tree is:
+
+```
+LayoutTimer  Label="Terminal.BuildPlanner"   Grid.Row=1
+└── Grid   VerticalAlignment=Bottom  HorizontalAlignment=Right
+           Margin=20,0,20,0  Background=#00FFFFFF  IsVisible=FALSE
+    ├── Border            Classes="Static TerminalOpacity"
+    └── StackPanel        Margin=10  Spacing=8
+        ├── TextBlock     "Build"
+        ├── TextBlock     "Planner"
+        ├── TextBlock     "(WIP Pos)"
+        ├── Button        "Produce"  Command={Binding BuildPlannerBlock_ScheduleAll}
+        ├── ItemsControl  ItemsSource={CompiledBinding BuildPlannerBlocks}
+        │   └── ItemTemplate → BuildPlannerIconControl
+        │           Icon          ={Binding Icon}
+        │           ProduceCommand={Binding ProduceBuildPlannerBlock}
+        │           RemoveCommand ={Binding RemoveBuildPlannerBlock}
+        └── Button        "Clear"    Command={Binding BuildPlannerBlock_ClearAll}
+```
+
+That is the SE1 build planner's terminal affordance, finished, styled with the terminal's own
+resources, and wired to all four view-model verbs. **Exactly three things stop it working**, and all
+three are reachable from a plugin:
+
+1. **`IsVisible = false` is a literal, not a binding.** In the decompiled `InitializeComponent`:
+   `grid29.IsVisible = false;` — IL `IL_1336: ldc.i4.0` / `IL_1337: callvirt Visual::set_IsVisible`.
+   No style, no trigger, no condition. The `(WIP Pos)` label next to it is Keen's own note that the
+   panel is parked mid-development.
+2. **`TerminalScreenViewModel._buildPlannerData` is never assigned.** The field is
+   `.field private initonly`; across the *entire* `Game2.Client.dll` IL there are six `ldfld`s and
+   **zero `stfld`s**. It is always null, so `BuildPlannerBlock_ScheduleAll`, `BuildPlannerBlock_ClearAll`,
+   `ProduceBuildPlannerBlock` and `RemoveBuildPlannerBlock` would each throw `NullReferenceException`
+   on the first button press.
+3. **`UpdateBuildPlannerBlocks` is never subscribed.** It has the right shape for
+   `BuildPlannerData.PropertyChanged` (`PerPlayerData : ObservableObject : INotifyPropertyChanged`),
+   but there is **no `ldftn` reference to it anywhere** — nothing hands it to any event. So
+   `BuildPlannerBlocks` would stay empty even with the data present.
+
+**How the mod supplies all three** (`src/TerminalPlannerPanel.cs`):
+
+- hook `TerminalScreen.InitializeComponent(bool)` — public, and the moment the XAML tree exists
+- find the panel by `LayoutTimer.Label == "Terminal.BuildPlanner"` (the Grid has no `x:Name`), set
+  its `Child.IsVisible = true`, and hide the `(WIP Pos)` label
+- set `_buildPlannerData` with `[UnsafeAccessor(UnsafeAccessorKind.Field)]` — it is `initonly`, so
+  this is the supported way in on net9.0, and it is type-checked at JIT time
+- fill `BuildPlannerBlocks` ourselves on `data.PropertyChanged`, using public API only
+  (`BuildPlannerBlocks` has a public getter, `BuildPlannerBlockModel(CubeBlockDefinition)` is public)
+  rather than reflecting on Keen's private `UpdateBuildPlannerBlocks`
+
+**Timing traps, both real:**
+
+- `TerminalScreen` is a `UserControl` (`ScreenView : ViewBase : UserControl`). After
+  `InitializeComponent` the panel is in the **logical** tree, but content only enters the **visual**
+  tree when the template is applied — a visual-tree search at that moment finds nothing. Search
+  logical first, and retry on `AttachedToVisualTree`.
+- `DataContext` is assigned by `ScreenView` (`base.DataContext = dataContext`) separately from
+  construction, so the view model may not be there yet either. Retry on `DataContextChanged`.
+  `TerminalScreen` is `IReusableScreen`, so the same control returns with a *new* view model — the
+  old `PropertyChanged` subscription has to be released or one dead view model accumulates per
+  terminal opened.
+
+### How much of the *functionality* did Keen ship? Almost none.
+
+The panel is finished; the machinery behind it is not. Reading the four verbs settles what this mod
+duplicates and what it adds.
+
+**`BuildPlannerBlock_ClearAll` / `RemoveBuildPlannerBlock`** — real, and trivial: `RemovePlannedBlock`
+on the list.
+
+**`TryScheduleBlockForProduction(CubeBlockDefinition)`** — the only genuine overlap with this mod, and
+it is far narrower than `ComponentProduction`:
+
+```csharp
+bool flag = true;                                     // seeded TRUE
+foreach (ItemAmount current in block.Items)
+    flag |= TryScheduleItem(current.Item, current.Amount);
+return flag;                                          // therefore ALWAYS true
+```
+
+1. **It only works with the production screen open.** `TryScheduleItem` starts
+   `if (ProductionScreen?.StreamedModel.Definition == null) return false;` — so the player must be at
+   a converter's terminal, on the production tab. There is no "aim at any conveyor-connected block".
+2. **One converter only** — whatever `StreamedModel` that screen is showing. No reachability search,
+   no next-converter fallback when a queue is full.
+3. **Full recipe, not the remainder.** It walks `block.Items`, so a half-welded block re-queues
+   everything already in it. `BlockRequirements.Remaining` exists in this mod for exactly that.
+4. **The return value is broken.** `flag` is seeded `true` and combined with `|=`, so it cannot ever
+   be false. `ProduceBuildPlannerBlock` uses it to decide whether to drop the block from the queue —
+   so the block is removed whether or not anything was actually scheduled.
+
+**Nothing populates the queue.** `AddPlannedBlock` has **zero callers in `Game2.Client.dll`**
+(IL-verified), no input action, and no localized string. The queueing half is absent, not hidden.
+
+**Withdrawal — the actual point of the Build Planner — does not exist anywhere in the engine.**
+No shipped code pulls a block's missing components into the player's inventory. Nor does deposit,
+×10, keep-queue, or any HUD feedback.
+
+So the mod duplicates one method, and that method is both more limited and buggier than its
+replacement. Everything else here is net-new.
+
+**Consequence for the panel — and what was done about it.** Left alone, its **Produce** button would
+run Keen's path: silently doing nothing unless a production screen is open, then clearing the queue
+regardless. All four verbs are therefore detoured and **replaced** (originals never called) with
+`BuildPlannerController.ProduceQueueFromTerminal`, `ProduceOneFromTerminal`,
+`RemoveQueuedFromTerminal` and `ClearQueueFromTerminal`, so the buttons run the same code as the
+keybinds and mutate one queue rather than two.
+
+Two departures from Keen's semantics, both deliberate: produce does **not** clear the queue (matching
+`SHIFT+N` — production only starts the components, and the player still has to withdraw them), and
+reachability is rooted at `TerminalScreenViewModel.Interacted` (a public property) rather than the
+interaction provider, since with a terminal open the player is looking at a screen rather than aiming
+at anything.
+
+**`UpdateBuildPlannerBlocks` caps the display at ten:**
+`for (i = 0; i < Math.Min(10, plannedBlocks.Count); i++)`. That is a layout constraint, not a
+preference — the ItemsPanel is a **vertical** `StackPanel` (no `Orientation` set) in a bottom-anchored
+Grid with no scroll viewer, so an uncapped list grows off the top of the screen.
+`TerminalPlannerPanel` matches the ten and logs when it is showing fewer blocks than are queued.
+
+### What a live session found (2026-08-22)
+
+The panel renders: a vertical list of block icons on the right, growing upward, in the terminal
+shell. It is plain, and it overlaps the terminal's scroll bar — consistent with `(WIP Pos)`, and
+evidence that this is not the finished layout Keen intends. Serviceable as-is.
+
+Three things the first live run settled that reading could not:
+
+1. **There is no separate remove button.** `BuildPlannerIconControl` puts one `Button` around each
+   icon and dispatches on mouse button inside `OnButtonPressed`:
+   `IsLeftButtonPressed → ProduceCommand`, `IsRightButtonPressed → RemoveCommand`. This matches SE1
+   (see `build-planner-ux-spec.md`), and is invisible unless you already know.
+2. **`TerminalScreenViewModel.Interacted` is a CLIENT entity — do not feed it to simulation
+   lookups.** Passing it as the reachability root made produce report "no assembler or refinery
+   connected" at a working assembler, because `ItemConverterComponent` and `InventoryComponent` are
+   `Game2.Simulation` types that live only on the server copy of the entity. See
+   `client-server-split.md`; the terminal view model is `Game2.Client`, so everything it hands you is
+   the client half. Reach must come from the server character's interaction provider, exactly as the
+   keybind does.
+3. **`EngineQueueMirror.Sync` rebuilds by remove-all/add-all, and every step notifies.** Each
+   `RemovePlannedBlock`/`AddPlannedBlock` raises `OnPropertyChanged("PlannedBlocks")`, so a naive
+   per-notification refresh ran ~2N+1 full rebuilds of the bound list per queued block — visible in
+   the log as counts ticking 12…0 then 0…13 on one keypress. Both the mirror and the queue now batch.
+
+**And one pre-existing bug the panel exposed.** `Withdraw` clears the queue on success but never
+called the mirror, unlike every other mutation site — so a withdrawal emptied the mod's queue while
+`BuildPlannerData` kept every block, and the panel went on displaying them. This had been latent
+since the mirror was written; nothing surfaced it until something finally *read* the engine's copy.
+`BuildPlannerQueue.Changed` now fires from the mutators themselves, so no call site can forget.
+
+**Method of discovery, worth keeping.** The XAML is compiled to IL, not stored as text, so grepping
+the DLL for `.axaml` content finds only path tables. What gave it away was Avalonia's compiled-binding
+metadata, which *is* plain text in the binary:
+
+```
+!Property.Keen.Game2.Client.UI.TerminalScreen.TerminalScreenViewModel,Game2.Client.BuildPlannerBlocks
+```
+
+A record like that only exists if some XAML actually compiled a binding to that property — which
+proved a real view referenced it before anything was decompiled. Grepping a binary with
+`grep -a -o '.\{0,300\}NEEDLE.\{0,300\}'` is pathological on a 40 MB DLL (it ran past two minutes);
+`grep -a -b -o NEEDLE` for byte offsets plus `dd` is instant.
 
 ## Production: the engine already cascades sub-components (2026-08-22)
 

@@ -194,6 +194,77 @@ The mod enqueues the top-level component recipe and stops.
   found here is one the terminal would also accept — but whether the engine refuses a locked recipe
   at a lower layer is unconfirmed.
 
+## Queue visibility in the terminal
+
+Open the terminal and the queue is listed bottom-right, in **Keen's own build planner panel** —
+"Build / Planner", a **Produce** button, one icon per queued block with per-block produce and remove
+buttons, and a **Clear** button.
+
+None of that is drawn by this mod. The whole panel is in the shipped `TerminalScreen.axaml`, wired to
+`TerminalScreenViewModel`'s four build-planner verbs, and left switched off mid-development — the
+`(WIP Pos)` label Keen put beside it says as much. Three separate omissions keep it dark, and
+`TerminalPlannerPanel` supplies all three:
+
+| What Keen left undone | Evidence | What the mod does |
+|---|---|---|
+| The panel's Grid is hidden | `IsVisible = false` as a literal in `InitializeComponent`, not a binding | Finds it by `LayoutTimer.Label == "Terminal.BuildPlanner"` and sets `IsVisible = true` |
+| `_buildPlannerData` is never assigned | `initonly` field, 6 `ldfld`s and **0 `stfld`s** in all of `Game2.Client.dll` | Sets it via `[UnsafeAccessor]` to the same instance `EngineQueueMirror` writes |
+| `UpdateBuildPlannerBlocks` is never subscribed | no `ldftn` to it anywhere | Fills `BuildPlannerBlocks` on `PropertyChanged`, using public API only |
+
+Without the second of those, the panel would still *list* blocks but every button would throw a
+`NullReferenceException` on the first press.
+
+The panel shows at most **ten** blocks — Keen's own cap, and a layout constraint rather than a
+preference: the icon list is a vertical `StackPanel` in a bottom-anchored Grid with no scroll viewer,
+so an uncapped list climbs off the top of the screen. The log says when more are queued than shown.
+
+### The buttons are routed at the mod, not at Keen's half-built verbs
+
+All four are detoured and **replaced** — the originals never run:
+
+| Control | Runs | Notes |
+|---|---|---|
+| **Produce** button | `ProduceQueueFromTerminal` | Same path as `SHIFT+N` |
+| **left-click** a block icon | `ProduceOneFromTerminal` | Only that block's outstanding components |
+| **right-click** a block icon | `RemoveQueuedFromTerminal` | Removes from the mod's queue; the mirror re-syncs |
+| **Clear** button | `ClearQueueFromTerminal` → `ClearQueue` | Same path as the clear-queue keybind |
+
+**There is no separate remove button, and this is not a missing feature.**
+`BuildPlannerIconControl` wraps each icon in a single `Button` whose `OnButtonPressed` dispatches on
+which mouse button was used — left to `ProduceCommand`, right to `RemoveCommand`. That matches SE1,
+where the wiki's build-planner page says "right-click a block inside the Build Planner removes it
+from the queue" (`../notes/build-planner-ux-spec.md`). It is simply undiscoverable: nothing on screen
+says so.
+
+That means one queue, not two: everything mutates `BuildPlannerQueue`, and `EngineQueueMirror`
+rebuilds the engine's `PlannedBlocks` from it afterwards, so the panel cannot drift from what a
+withdrawal will actually pull.
+
+**Why replace rather than wrap** — Keen's `TryScheduleBlockForProduction` does nothing unless a
+production screen is already open, targets only that one converter, queues each block's *full* recipe
+rather than what is missing, and returns a success flag seeded `true` and OR-ed, so it can never be
+false. `ProduceBuildPlannerBlock` uses that flag to decide whether to drop the block, so the shipped
+button clears the block whether or not anything was scheduled. Running it alongside ours would
+enqueue twice and still lose the queue.
+
+**Two deliberate departures from Keen's behaviour:**
+
+- **Produce does not clear the queue.** Keen's `ScheduleAll` clears unconditionally. Production only
+  *starts* the components — the player still has to come back and withdraw them, and unlike a
+  withdrawal there is nothing in their inventory afterwards to reconstruct the queue from. This
+  matches `SHIFT+N`, which has always behaved this way for that reason.
+- **Reach is resolved exactly as the keybind resolves it**, from the interaction provider on the
+  **server** character. An earlier revision had the panel pass `TerminalScreenViewModel.Interacted`
+  instead, reasoning that a player with a terminal open is not aiming at anything. That produced
+  "no assembler or refinery connected" while standing at a working assembler, because the terminal
+  view model is `Game2.Client` and its entity is the **client** copy, while `ItemConverterComponent`
+  and `InventoryComponent` are `Game2.Simulation` and exist only on the **server** copy — the trap
+  `../notes/client-server-split.md` exists to warn about. Observed in game 2026-08-22 and reverted.
+
+Full derivation, including the two timing traps (logical vs visual tree, and when `DataContext`
+arrives) in `../notes/build-planner-api.md`, "The terminal's build planner panel is complete but
+switched off".
+
 ## Rebinding
 
 All nine actions appear in **Options → Controls → Building**, named `Build Planner: …`, and each can
@@ -267,6 +338,13 @@ Everything in the control table above, plus: components for partly-built blocks 
 amount, not a full recipe), projections, the placement-mode guard, the pause guard, deposit keeping
 your tools, and HUD notifications.
 
+**The terminal panel, end to end (2026-08-22).** Revealed and bound on every terminal open; the list
+tracks queueing live; the ten-item cap engages; **Produce** reaches converters across the conveyor
+network (`3 item converter(s) conveyor-reachable from 'CargoContainer750_ServerComposition'` →
+recipes enqueued at `Smelter250_ServerComposition`) and leaves the queue intact; left-click produces
+one block; right-click removes one, including consecutive removes that re-index correctly; **Clear**
+empties it. A complete withdrawal empties the panel, a partial one deliberately does not.
+
 ## Previously awaiting verification (all now confirmed)
 
 Kept as a record of what was uncertain and how each was settled — not as an outstanding list.
@@ -280,9 +358,10 @@ Kept as a record of what was uncertain and how each was settled — not as an ou
    `InGameUI.ShowNotification(HudNotification)` is called.
    *Test:* any action — the message should appear on screen, not only in the log. Every failure to
    reach the HUD logs its own reason (`notify: …`) and still records the message.
-3. **Terminal queue visibility.** The queue is mirrored into `BuildPlannerData`; the terminal screen
-   is already wired to that data.
-   *Test:* queue a few blocks, then open the terminal and look for them.
+3. **Terminal queue visibility.** The queue is mirrored into `BuildPlannerData`, and
+   `TerminalPlannerPanel` reveals the panel Keen shipped hidden and feeds it that data.
+   *Test:* queue a few blocks, then open the terminal (F) and look bottom-right for a "Build Planner"
+   box listing them.
 4. **Placement-mode guard.** Right-click used to queue while in block/projection placement mode,
    where the game already uses RMB. The captured tool component is now released on the tool's own
    `CloseHUD`, and queueing additionally requires its block panel (`_screen`) to be open.
@@ -349,15 +428,7 @@ right-click so it is never claimed while a terminal or inventory screen is open.
 1. **Produce ×10 and the moved SHIFT+ALT clear-queue chord have not been separately exercised.** Both
    share their code paths with actions that have been verified, so this is a gap in testing rather
    than a known defect.
-2. **The terminal queue screen.** The queue is now mirrored into the engine's own
-   `BuildPlannerData.PlannedBlocks`, which `TerminalScreenViewModel` already binds to
-   (`BuildPlannerBlocks`, `UpdateBuildPlannerBlocks`, `BuildPlannerBlock_ClearAll`,
-   `BuildPlannerBlock_ScheduleAll`). Keen built the screen and left the data unpopulated; filling it
-   is what should make the queue visible in-game. **Unverified**, and two things are unknown: whether
-   an already-open terminal refreshes (the update handler is driven by `PropertyChanged`, which a
-   plain `List.Add` does not raise), and whether removing a block there feeds back to the mod's own
-   queue — it currently does not.
-3. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
+2. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
    against a real server.
 
 ## Logging
@@ -430,10 +501,11 @@ instance — must be copied to the output folder.
 | `InventorySources.cs` | Aimed container → conveyor-reachable inventories |
 | `IntegrityToolAccess.cs` | The welder's current target — what to queue |
 | `EngineQueueMirror.cs` | Mirrors the queue into the engine's `BuildPlannerData` |
+| `TerminalPlannerPanel.cs` | Reveals Keen's hidden terminal panel and feeds it that data |
 | `PlayerAccess.cs` | Character and inventory lookup (both sessions) + diagnostics |
 | `Modifiers.cs` | Live CTRL/ALT/SHIFT state → action |
 | `Notifier.cs` | Outcome messages |
-| `Log.cs` | File logging; `Log.Debug` is gated by the `debug` flag file |
+| `Log.cs` | File logging; verbose by default, silenced by the `quiet` flag file |
 
 Tests live in `../BuildPlanner.Tests`.
 
