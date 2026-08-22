@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <OutputPath>bin\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <AssemblyName>BuildPlanner</AssemblyName>
+    <RootNamespace>BuildPlanner</RootNamespace>
+
+    <!-- Override with: dotnet build -p:GameDir=... -->
+    <GameDir Condition="'$(GameDir)' == ''">F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2</GameDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MonoMod.RuntimeDetour" Version="25.3.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VRage.Core">        <HintPath>$(GameDir)\VRage.Core.dll</HintPath>        <Private>false</Private></Reference>
+    <Reference Include="VRage.Core.Game">   <HintPath>$(GameDir)\VRage.Core.Game.dll</HintPath>   <Private>false</Private></Reference>
+    <Reference Include="VRage.Library">     <HintPath>$(GameDir)\VRage.Library.dll</HintPath>     <Private>false</Private></Reference>
+    <Reference Include="VRage.Input">       <HintPath>$(GameDir)\VRage.Input.dll</HintPath>       <Private>false</Private></Reference>
+    <Reference Include="VRage.DCS">         <HintPath>$(GameDir)\VRage.DCS.dll</HintPath>         <Private>false</Private></Reference>
+    <Reference Include="VRage.Game">        <HintPath>$(GameDir)\VRage.Game.dll</HintPath>        <Private>false</Private></Reference>
+    <Reference Include="VRage.UI.Shared">   <HintPath>$(GameDir)\VRage.UI.Shared.dll</HintPath>   <Private>false</Private></Reference>
+    <Reference Include="Game2.Client">      <HintPath>$(GameDir)\Game2.Client.dll</HintPath>      <Private>false</Private></Reference>
+    <Reference Include="Game2.Game">        <HintPath>$(GameDir)\Game2.Game.dll</HintPath>        <Private>false</Private></Reference>
+    <Reference Include="Game2.Simulation">  <HintPath>$(GameDir)\Game2.Simulation.dll</HintPath>  <Private>false</Private></Reference>
+    <Reference Include="Avalonia.Base">     <HintPath>$(GameDir)\Avalonia.Base.dll</HintPath>     <Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>
