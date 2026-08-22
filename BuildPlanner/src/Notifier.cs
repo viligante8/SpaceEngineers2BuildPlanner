@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Text;
 using Keen.Game2.Client.UI.HUD.Notification;
 using Keen.Game2.Simulation.WorldObjects.Items;
+using Keen.VRage.Core.Render;
 using Keen.VRage.Library.Localization;
+using Keen.VRage.Library.Utils;
 
 namespace BuildPlanner;
 
@@ -67,16 +69,56 @@ internal sealed class Notifier
 
     internal void AlreadyHaveEverything() => Info("Build Planner: you already have everything queued");
 
-    internal void Withdrew(IReadOnlyList<ItemAmount> transferred) =>
-        List("Build Planner: withdrew", transferred, NotificationType.Info);
+    internal void Withdrew(IReadOnlyList<ItemAmount> transferred) => Gained(transferred);
 
     internal void WithdrewPartial(IReadOnlyList<ItemAmount> transferred, IReadOnlyList<ItemAmount> missing)
     {
         // Two messages, not one sentence. Joining them with an em dash produced a line far past what
         // the HUD can show, so the half the player most needs - what is still missing - was the half
         // that got cut off.
-        List("Build Planner: withdrew", transferred, NotificationType.Info);
+        Gained(transferred);
         List("Build Planner: still short", missing, NotificationType.Error);
+    }
+
+    /// <summary>
+    /// Report received items the way the game does: one structured notification each.
+    ///
+    /// This is how vanilla reports a transfer - <c>InventoryNotificationsSessionComponent.DisplayItem</c>
+    /// calls <c>CreateMaterialNotification(icon, name, amount, total)</c> per item and never composes
+    /// a sentence. The HUD is built for exactly that: <c>TryUpdateNotification</c> finds an existing
+    /// row with the same name and *adds* to it (<c>Amount += ...</c>) rather than stacking a second,
+    /// and the amount and name are separate bound fields, so neither competes for the one line of
+    /// width that free text has to fit into.
+    ///
+    /// Withdrawing twice therefore updates one row instead of filling the stack, which matters:
+    /// <c>MaterialNotificationConfiguration.MaxStackCount</c> is 3, and anything beyond it waits in a
+    /// queue until an earlier notification expires.
+    /// </summary>
+    private void Gained(IReadOnlyList<ItemAmount> items)
+    {
+        if (items == null || items.Count == 0) return;
+
+        foreach (var item in items)
+        {
+            if (item.Item == null) continue;
+
+            try
+            {
+                // The cast is the one vanilla's own DisplayItem performs: an item's Icon is a
+                // ResourceHandle<PngAsset>, and the notification wants a ResourceHandle<GUIAsset>.
+                var icon = (ResourceHandle<GUIAsset>)(ResourceHandle)item.Item.Icon;
+
+                // Total left null: it means "how many you now hold", which is the destination
+                // inventory's business, not the withdrawal's. Reporting a wrong total would be worse
+                // than reporting none - the field simply goes unshown.
+                _show(HudNotification.CreateMaterialNotification(
+                    icon, item.Item.DisplayName, (int)item.Amount, null));
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"failed to show a material notification for {item.Item.DisplayName}", ex);
+            }
+        }
     }
 
     internal void NothingAvailable(IReadOnlyList<ItemAmount> missing) =>

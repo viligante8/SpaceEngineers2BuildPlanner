@@ -996,3 +996,38 @@ Consequences for any message this mod shows:
 with a `Title` plus a `Content` "shown beneath the title", and may not share this constraint. It is
 definition-driven, so using it from a plugin would mean creating a definition at runtime the way the
 input actions do. Unexplored.
+
+
+## Keen's answer to long messages: don't have any (2026-08-22)
+
+`InventoryNotificationsSessionComponent` shows the pattern the engine is built around:
+
+```csharp
+// per item transferred - icon, name, amount, new total
+_ui.ShowNotification(HudNotification.CreateMaterialNotification(
+    icon, item.Value.Item.DisplayName, (int)item.Value.TransferredAmount, (int)item.Value.TotalAmount));
+
+// a whole-condition message - short, authored in config, localised
+_ui.ShowNotification(HudNotification.CreateTextNotification(
+    _config.FullInventoryIcon, _config.FullInventoryText, NotificationPriority.Normal, NotificationType.Error));
+```
+
+Free text is reserved for short fixed strings. Anything list-shaped is emitted as one **structured**
+notification per item, and `HUDNotificationCollectionViewModel` is built for that:
+
+- `TryUpdateNotification` matches an existing row by `Name` and calls `Update`, which does
+  `Amount += notification.Amount.Value` and resets the timer — repeats coalesce onto one row instead
+  of stacking.
+- `MaterialNotificationConfiguration.MaxStackCount` defaults to **3**; beyond that notifications wait
+  in `_notificationQueue` until an earlier one expires. Emitting five text lines therefore hides the
+  first two until later.
+- Amount and name are separate bound fields, so neither competes for the single line of width that
+  free text must fit inside.
+
+The icon cast vanilla performs is worth copying verbatim: `ItemDefinition.Icon` is a
+`ResourceHandle<PngAsset>` and the notification wants a `ResourceHandle<GUIAsset>`
+(`Keen.VRage.Core.Render`), via the non-generic `ResourceHandle` (`Keen.VRage.Library.Utils`).
+
+**`Amount` has no `NotificationType`.** `CreateMaterialNotification` reads as a gain, so a shortfall
+("still short 611x Steel Plate") cannot use it and stays as text — which is fine, since those lines
+are short.

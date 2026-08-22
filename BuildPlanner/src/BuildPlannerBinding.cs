@@ -663,7 +663,15 @@ internal static class BuildPlannerBinding
     /// </summary>
     private static void ShowNotification(HudNotification notification)
     {
-        var text = notification.Content?.ToString() ?? notification.Name.ToString();
+        // Material notifications carry no Content: the amount and the item name are separate fields,
+        // which is exactly why they survive the HUD's one-line width limit. Rebuild the sentence for
+        // the log, or a withdrawal would be recorded as a bare "Steel Plate" with no quantity - and
+        // the log is how these runs are checked after the fact.
+        var text = notification.Content?.ToString()
+                   ?? (notification.Amount.HasValue
+                       ? $"{notification.Amount.Value}x {notification.Name}"
+                       : notification.Name.ToString());
+
         Log.Write($"  notify: {text}");
 
         var ui = ResolveInGameUI();
