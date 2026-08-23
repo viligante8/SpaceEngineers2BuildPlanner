@@ -64,8 +64,6 @@ internal sealed class Notifier
 
     internal void NothingToQueue() => Warning("Build Planner: not looking at an unfinished block");
 
-    internal void AlreadyComplete() => Info("Build Planner: that block is already finished");
-
     internal void AlreadyHaveEverything() => Info("Build Planner: you already have everything queued");
 
     internal void Withdrew(IReadOnlyList<ItemAmount> transferred) => Gained(transferred);
@@ -179,8 +177,18 @@ internal sealed class Notifier
     internal void AlreadyHaveEverythingToProduce() =>
         Info("Build Planner: you already have everything queued; nothing to produce");
 
-    internal void Deposited(int stacks) =>
-        Info(stacks > 0 ? $"Build Planner: deposited {stacks} stack(s)" : "Build Planner: nothing to deposit");
+    /// <summary>
+    /// Report a deposit by the number of item TYPES moved, which is what the caller counts.
+    ///
+    /// This said "stack(s)", which it never was: deposit de-duplicates by item definition and hands
+    /// each type over in one go, spread across as many containers as it takes. Five stacks of Steel
+    /// Plate leaving the player is one entry in that count, and calling it "1 stack" was simply a
+    /// wrong number on screen.
+    /// </summary>
+    internal void Deposited(int itemTypes) =>
+        Info(itemTypes > 0
+            ? $"Build Planner: deposited {itemTypes} item type(s)"
+            : "Build Planner: nothing to deposit");
 
     /// <summary>
     /// Renders production orders as amounts, not run counts.
