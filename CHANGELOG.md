@@ -18,6 +18,12 @@
   `IterateReachableInventories`. Every port on the block is walked and the results merged, since a
   block can carry several that do not lead to the same place.
 
+  This covers **producing** as well as withdrawing and depositing. The first cut of it did not:
+  withdrawal learned to start from a conveyor port and the assembler search did not, so components
+  could be pulled through a Survival Kit while the same keypress a moment later reported no
+  assembler connected. Both now make the same call, so they cannot disagree about reach - which
+  they had already done once before, when both swept the grid and ignored conveyors entirely.
+
 - **A clearer refusal.** "Not looking at a container" covered both aiming at nothing and aiming at
   something that turned out to be empty. The second now names the block and says nothing was
   reachable through it.

@@ -53,21 +53,7 @@ internal static class InventorySources
                 PlayerAccess.LogInventoryContents(target.DebugName, inventory);
             }
 
-            var direct = own.Count > 0 ? own[0] : null;
-
-            // Then everything that can reach it across the conveyor network.
-            //
-            // Starting from the block's own inventory when it has one, and from its conveyor PORT
-            // when it does not. A Survival Kit is the case that forced this: it is a respawn point
-            // with a conveyor port and no inventory at all, so aiming at one used to refuse
-            // outright even though the network behind it was full of components. Reported by a
-            // player, who reasonably guessed small conveyors were filtering things out.
-            //
-            // The same applies to every port-only block - conveyor tubes, junctions, sorters.
-            // SE1's Build Planner pulled through any connected port, and so does this now.
-            var reached = direct != null ? Reachable(direct) : ReachableFromPorts(target);
-
-            foreach (var inventory in reached)
+            foreach (var inventory in ReachableThrough(target, own.Count > 0 ? own[0] : null))
             {
                 if (inventory == null || sources.Contains(inventory)) continue;
                 sources.Add(inventory);
@@ -108,6 +94,29 @@ internal static class InventorySources
     /// The start inventory is excluded by the enumerator (it is passed as <c>ignoreInventory</c>), so
     /// callers add it themselves — which is what puts the aimed container first in the list.
     /// </remarks>
+    /// <summary>
+    /// Every inventory reachable through a block, however that block is plumbed in.
+    /// </summary>
+    /// <remarks>
+    /// **The single answer to "what can I reach from here", for every caller.**
+    ///
+    /// Withdrawal and the assembler search each used to decide this for themselves, and they have
+    /// now diverged twice. First both swept the whole grid and ignored conveyors entirely, so an
+    /// unattached container could pull from a ship and dispatch work to its assemblers. Then, fixing
+    /// port-only blocks, withdrawal learned to start from a conveyor node and the converter search
+    /// did not - so a player could pull components through a Survival Kit but was told no assembler
+    /// was connected, from the same spot, in the same breath. Reported in game.
+    ///
+    /// Two callers asking the same question have to get the same answer, so they now ask once.
+    /// </remarks>
+    /// <param name="block">the aimed block, used for its conveyor ports when it holds nothing.</param>
+    /// <param name="own">
+    /// an inventory on that block, or null when it has none. Preferred as the walk's start when
+    /// present: it is the node the engine's own transfers use.
+    /// </param>
+    private static IEnumerable<InventoryComponent> ReachableThrough(Entity block, InventoryComponent? own)
+        => own != null ? Reachable(own) : ReachableFromPorts(block);
+
     /// <summary>
     /// Every inventory reachable through a block's own conveyor ports, for blocks that hold nothing.
     /// </summary>
@@ -247,17 +256,11 @@ internal static class InventorySources
             }
 
             // Then every converter whose output can reach the aimed block across the conveyor
-            // network — the same walk the withdrawal uses, so the two halves of the feature agree
-            // about reach. Previously this swept the grid, which let an unattached container
-            // dispatch work to assemblers it was not plumbed to.
-            var start = FindInventory(target);
-            if (start == null)
-            {
-                Log.Write("  Build Planner: that block has no inventory, so no assembler is reachable through it");
-                return converters;
-            }
-
-            foreach (var inventory in Reachable(start))
+            // network - literally the same call the withdrawal makes, so the two halves of the
+            // feature cannot disagree about reach. They have twice: once when both swept the grid
+            // and ignored conveyors, and once when only withdrawal learned to start from a
+            // conveyor port. See ReachableThrough.
+            foreach (var inventory in ReachableThrough(target, FindInventory(target)))
             {
                 var owner = inventory?.Entity;
                 if (owner == null || !seen.Add(owner)) continue;
