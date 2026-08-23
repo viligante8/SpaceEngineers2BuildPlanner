@@ -93,6 +93,19 @@ MonoMod and Mono.Cecil are both MIT, which is why the notices file travels with 
 
 ## Versioning
 
+Semver. The version is not a counter.
+
+- **MAJOR** - a break for existing users: a control removed, a flag file renamed, behaviour someone
+  relied on now different.
+- **MINOR** - a new capability. Pulling through conveyor ports was one; it shipped as 1.0.4 by
+  mistake and had to be retagged 1.1.0.
+- **PATCH** - fixes, documentation, packaging, licensing. Nothing a user could not already do.
+
+**The changelog is the check.** An `### Added` section listing something a player can now *do* means
+the number needs a minor bump, and writing the entry before choosing the version makes that obvious.
+`### Fixed`, `### Documentation` and `### Project` are all patch-level - keep them out of `Added` so
+the signal stays honest.
+
 The version is stamped into the assembly and reported on the plugin's first log line:
 
 ```

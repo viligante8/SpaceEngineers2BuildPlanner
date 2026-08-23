@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.4 — 2026-08-23
+## 1.1.0 — 2026-08-23
 
 ### Added
 
@@ -78,13 +78,11 @@ An adversarial re-review of the 1.0.2 fixes found several of them wrong. This is
   user name, and is scoped to files this project builds - the bundled MonoMod assemblies carry their
   upstream maintainer's build paths, which are not ours to strip.
 
-### Added
+### Documentation
 
 - `SECURITY.md` - what the plugin touches, and commands to verify each claim rather than trust it.
 - A `What it touches` section in the README, and an antivirus note. The safety claim previously
   shipped only inside the zip, so it could not be read before taking the risk.
-
-### Documentation
 
 Five engine claims that did not survive a check against the shipped assemblies were corrected,
 including one in the "read this first" note that had `"Type": null` in an entity composite exactly
@@ -115,7 +113,7 @@ Maintenance release. **Use this instead of 1.0.0, which has been withdrawn.**
   it. Every reachable container is now offered the item.
 - **Deposit reports item types rather than "stacks"**, which is what it was actually counting.
 
-### Added
+### Project
 
 - MIT `LICENSE`. The repository previously had none, which left it all-rights-reserved.
 - Third-party notices now reproduce the real copyright lines and credit **iced** as its own project
