@@ -348,7 +348,9 @@ internal static class BuildPlannerBinding
     }
 
     /// <summary>
-    /// The active world session, needed to locate the local player.
+    /// The CLIENT session. Client-only systems live here - the block placer
+    /// (Game2.Client.GameSystems.BlockPlacement) and the in-game UI - while the server session owns
+    /// simulation state such as inventories. Both halves run in-process.
     ///
     /// InputGameComponent lives on the *engine* entity, whose scene is the app-level GameCoreScene â€”
     /// not a world session. Entity.GetSession() therefore threw
@@ -357,11 +359,6 @@ internal static class BuildPlannerBinding
     /// The route below is the one McpServerComponent uses to reach a session from outside any
     /// session: the scene's UserObject is the GameCoreScene, and its GameClient owns the session.
     /// Resolved per call because it is null at the main menu and changes with each world load.
-    /// </summary>
-    /// <summary>
-    /// The CLIENT session. Client-only systems live here - the block placer
-    /// (Game2.Client.GameSystems.BlockPlacement) and the in-game UI - while the server session owns
-    /// simulation state such as inventories. Both run in-process in single player.
     /// </summary>
     internal static Session? GetClientSession(Keen.VRage.DCS.Components.Entity hostEntity)
     {
@@ -416,9 +413,9 @@ internal static class BuildPlannerBinding
             var scene = hostEntity.Scene?.UserObject as GameCoreScene;
             if (scene == null) return null;
 
-            // GameCoreScene exposes BOTH halves. In single player they run in-process, and the
-            // client session's character (CompositeCharacterServer) carries no InventoryComponent -
-            // verified exhaustively in game. Prefer whichever session actually has one.
+            // GameCoreScene exposes BOTH halves. They run in-process, and the client session's
+            // character (CompositeCharacterServer) carries no InventoryComponent - verified
+            // exhaustively in game. Prefer whichever session actually has one.
             var clientSession = scene.GameClient?.Get<WorldSessionComponent>()?.OwnedSession;
             var serverSession = scene.GameServer?.Get<WorldSessionComponent>()?.OwnedSession;
 

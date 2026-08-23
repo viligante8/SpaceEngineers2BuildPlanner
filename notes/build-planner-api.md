@@ -152,8 +152,8 @@ withdrawal feedback Build Planner needs. `DisplayFull()` in that class is the sh
 
 See `client-server-split.md` for the full account. Summary:
 
-- `GameCoreScene` exposes `GameClient` and `GameServer`; both run in-process in single player and
-  each owns a `Session` via `Get<WorldSessionComponent>().OwnedSession`.
+- `GameCoreScene` exposes `GameClient` and `GameServer`; both run in-process and each owns a
+  `Session` via `Get<WorldSessionComponent>().OwnedSession`.
 - Inventories live on the **server** session's character; the block placer and UI live on the
   **client** session's. Both characters report the debug name `CompositeCharacterServer`.
 - `Session.GetEntitiesOfType<T>()` is public; `QueryAllEntities()` is internal.

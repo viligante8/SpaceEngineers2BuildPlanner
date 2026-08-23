@@ -304,7 +304,7 @@ A mod is a `.vrgproj` (JSON, `VRageProjectData`) with `"Type": "Mod"`, plus `Ass
 `Content/`, and `ModProject.modhub-metadata`.
 
 Existing scaffold on this machine:
-`C:\Users\vilig\Documents\SpaceEngineers2\Mods\New SE2 Mod\`
+`%USERPROFILE%\Documents\SpaceEngineers2\Mods\New SE2 Mod\`
 
 Key fields — `ProjectID.Guid` (this mod's identity), `ProjectDependencies` (Vanilla is
 `56dacb76-e25e-468a-9432-21964a9a0569`, matching `Vanilla.vrgproj`'s own `ProjectID`), and
@@ -331,7 +331,7 @@ SDK   /f/SteamLibrary/steamapps/common/Space Engineers 2 - Mod SDK
 GAME  /f/SteamLibrary/steamapps/common/SpaceEngineers2
 XML   $GAME/Game2/*.xml
 V     $SDK/GameData/Vanilla
-MODS  /c/Users/vilig/Documents/SpaceEngineers2/Mods
+MODS  $USERPROFILE/Documents/SpaceEngineers2/Mods
 ```
 
 Also in the SDK: `Editor/` (Avalonia-based mod editor), `ExampleMod1/` (raw art source only — FBX,
@@ -568,9 +568,22 @@ python -c "import uuid; print(uuid.uuid4())"
 
 # Repo Conventions
 
-This project (`se2/mod1`) is not yet a git repository and the mod's direction is not yet fixed. Keep
-this section updated as it takes shape — build/publish steps, where the working mod project lives
-relative to `MODS`, and any per-mod conventions.
+This project is a git repository published at
+`https://github.com/viligante8/SpaceEngineers2BuildPlanner`, MIT licensed (`LICENSE`).
+
+It holds one deliverable: the **Build Planner** plugin (`BuildPlanner/`), with unit tests in
+`BuildPlanner.Tests/`, engine findings in `notes/`, manual test steps in `notes/in-game-tests.md`,
+and release instructions in `RELEASING.md`. `README.md` at the root is the public front page.
+
+**Never put an absolute path containing a user name into a tracked file or a shipped binary.** A
+released `.pdb` and an un-mapped DLL both published this machine's user name to every downloader
+once already; `<PathMap>` in the csproj and a guard in `scripts/package.ps1` now prevent it, and the
+docs use `%USERPROFILE%` or a generic `C:\SE2Mods\` example.
+
+**Space Engineers 2 has no multiplayer.** Do not write "unverified in multiplayer", "on a dedicated
+server", or "in single player" — the first two describe something that does not exist, and the third
+implies a contrast with it. The client/server split inside the engine is real and important
+(`notes/client-server-split.md`), but both halves run in-process, always.
 
 Do not commit, publish to the Workshop, or otherwise push anything outward without being asked.
 

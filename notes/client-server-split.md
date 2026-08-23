@@ -6,7 +6,7 @@ touches the player, their inventory, or client-side systems.
 ## The shape of it
 
 `GameCoreScene` (reachable from any entity via `entity.Scene?.UserObject as GameCoreScene`) exposes
-**two** halves, and in single player **both run in-process**:
+**two** halves, and **both run in-process**:
 
 ```csharp
 public Entity? GameServer { get; private set; }
