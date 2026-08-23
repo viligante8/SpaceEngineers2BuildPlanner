@@ -2,6 +2,22 @@
 
 Releases are cut from a developer's machine. There is no CI.
 
+## Installing a build to test it
+
+```powershell
+.\packaging\install.ps1 -SkipTests -ClearLog
+```
+
+Builds, installs to `C:\BuildPlanner` (override with `-InstallDir` or `$env:SE2_PLUGIN_DIR`), and
+verifies by hash that the bytes in place are the bytes just built - a local build and the release it
+came from can carry the same version, so the version string proves nothing.
+
+It refuses to start if the game is running, rather than failing halfway through and leaving some
+DLLs new and some old with no obvious sign of it.
+
+It goes through `package.ps1` deliberately, so what gets tested is what would ship, including the
+path-leak guard and the absence of debug symbols.
+
 ## Cutting a release
 
 ```powershell
