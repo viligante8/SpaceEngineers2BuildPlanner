@@ -499,6 +499,15 @@ internal sealed class BuildPlannerController
         }
 
         var character = PlayerAccess.GetLocalCharacter(session);
+        if (character == null)
+        {
+            // Named separately from the inventory failure below. Passing a null character on and
+            // letting the inventory lookup report it blamed the wrong thing, which is exactly the
+            // misdirection that costs a test run to unpick.
+            _notifier.Warning("Build Planner: could not find your character");
+            return;
+        }
+
         var source = PlayerAccess.GetCharacterInventory(character, session);
         if (source == null)
         {
@@ -544,6 +553,14 @@ internal sealed class BuildPlannerController
 
         foreach (var itemDef in toMove)
         {
+            // Every destination is offered the item, not just the first one that takes any of it.
+            //
+            // Stopping at the first acceptance loses the remainder whenever that container fills up
+            // partway through - the player keeps a part-stack and nothing says why, while a second
+            // container on the same conveyor network sits empty. The withdrawal has always walked
+            // its sources this way; deposit did not, and the asymmetry was the bug.
+            var movedThisItem = false;
+
             foreach (var destination in destinations)
             {
                 if (destination == null || ReferenceEquals(destination, source)) continue;
@@ -551,16 +568,20 @@ internal sealed class BuildPlannerController
                 try
                 {
                     if (source.TransferByDef(destination, itemDef, null, null, true) > 0)
-                    {
-                        moved++;
-                        break;
-                    }
+                        movedThisItem = true;
                 }
                 catch (Exception ex)
                 {
                     Log.Error($"deposit of {itemDef.DisplayName} failed", ex);
                 }
+
+                // Nothing of this type left to place; the rest of the containers are irrelevant.
+                // HasItem is documented as "whether the inventory contain specific item with
+                // quantity greater than zero", which is exactly the question here.
+                if (!source.HasItem(itemDef)) break;
             }
+
+            if (movedThisItem) moved++;
         }
 
         _notifier.Deposited(moved);
