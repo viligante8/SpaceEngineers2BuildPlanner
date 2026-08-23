@@ -26,6 +26,37 @@ list and is not installed through the Workshop. It is always active once the lau
 To uninstall, remove the launch option and delete the folder. Full instructions ship in the zip as
 `INSTALL.txt`.
 
+## What it touches
+
+It is a plugin, so it runs as code inside the game and patches engine methods at runtime. That is a
+lot of trust to ask, so here is the whole of it.
+
+| | |
+|---|---|
+| Network connections | **None.** No socket, no HTTP, no DNS. |
+| Starting processes | **None.** |
+| Registry | **None.** |
+| Files it reads | Only its own folder: the optional `quiet` and `queries.txt` flags. |
+| Files it writes | Its own log, **plus** your control bindings (below). |
+| Bundled binaries | Unmodified MonoMod and Mono.Cecil from NuGet. |
+
+Two things it changes outside its own folder, both deliberate:
+
+- **Your control bindings.** Its nine actions are saved in your game options like any other
+  rebindable control. It also removes bindings whose action ID is all zeroes — versions before 1.0.0
+  wrote those, and the game can never resolve one to anything. Real bindings have real IDs and are
+  untouched.
+- **Your world.** It moves items between inventories and queues recipes at assemblers. That is what
+  the controls do.
+
+**Your antivirus may complain.** Patching methods in memory needs `VirtualAlloc`/`VirtualProtect`
+and `LoadLibrary`, which is also what an injector does, so heuristic scanners sometimes flag it.
+Those calls live in MonoMod — the standard .NET patching library that most game mods use —
+and `BuildPlanner.dll` itself contains none. The release is not code-signed either, so SmartScreen
+may warn. If that is not a trade you want to make, do not install it.
+
+To check any of this yourself rather than taking my word for it, see [SECURITY.md](SECURITY.md).
+
 ## Status
 
 **Working and confirmed in game.** Aim at an unfinished block with a welder, right-click to queue,
@@ -77,8 +108,12 @@ up there rather than the shipped default.
 
 ## Controls
 
-Every row is a separate input action and is separately rebindable — see "Rebinding" below. The
-chords are only the defaults.
+The nine keyboard and mouse actions below are separate input actions, each separately rebindable
+— see "Rebinding". The chords are only the defaults.
+
+Queueing from the build menu is the exception: it is hooked at the menu's own UI handlers rather
+than through the input system, so it is not an input action and does not appear in Options ->
+Controls. "Queueing from the build menu" below explains why.
 
 | Default | Action | Verified in game |
 |---|---|---|
@@ -380,7 +415,7 @@ cd BuildPlanner.Tests
 dotnet test
 ```
 
-43 tests, covering the logic that is decidable without the game running:
+61 tests, covering the logic that is decidable without the game running:
 
 | Unit | Why it is tested |
 |---|---|
@@ -404,7 +439,7 @@ has actually had was a fact about the engine, not an arithmetic slip:
 | Captured tool component stayed live in placement mode | Same. |
 
 So the suite is regression-proofing for refactors, **not** evidence the feature works. Nothing here
-substitutes for loading it — see "Awaiting in-game verification".
+substitutes for loading it; the manual procedure is in [notes/in-game-tests.md](notes/in-game-tests.md).
 
 Note `Private=true` on the engine references in the test csproj (the plugin uses `false`): the test
 host has no game assemblies loaded, so anything a test touches at runtime — `FixedPoint`, for

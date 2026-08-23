@@ -77,8 +77,38 @@ This plugin patches game methods at runtime, so a Space Engineers 2 update can
 break it. If it stops working after an update, check the log for a line saying
 a hook could not be installed, and look for a newer release.
 
-It runs entirely on your machine: it makes no network connections and writes
-nothing outside its own log folder above.
+WHAT IT TOUCHES
+---------------
+
+It runs entirely on your machine. It makes no network connections, starts no
+processes, and reads no registry keys.
+
+It changes three things:
+
+  * its own log, in the folder above;
+  * your control bindings - its nine actions are saved in your game options
+    like any other rebindable control. It also removes any binding whose
+    action ID is all zeroes, which versions before 1.0.0 wrote and which the
+    game can never resolve to anything. Real bindings all have real IDs and
+    are left alone;
+  * your world - it moves items between inventories and queues recipes at
+    assemblers, which is what the controls do.
+
+It does not read or write your saves, screenshots, or anything else.
+
+
+IF YOUR ANTIVIRUS COMPLAINS
+---------------------------
+
+It may. This plugin changes game methods in memory while the game runs, which
+needs VirtualAlloc/VirtualProtect and LoadLibrary. Editing code in memory is
+also what an injector does, so heuristic scanners sometimes flag it.
+
+Those calls are in MonoMod, the standard .NET patching library used by most
+game mods - BuildPlanner.dll itself contains none. The release is also not
+code-signed, so SmartScreen may warn as well.
+
+If that is not a trade you want to make, do not install it.
 
 
 LICENSE
