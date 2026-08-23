@@ -1,23 +1,33 @@
 Third-party components bundled with Build Planner
 =================================================
 
-Build Planner ships the following libraries alongside BuildPlanner.dll. Both are
+Build Planner ships the following libraries alongside BuildPlanner.dll. They are
 required at runtime: the plugin patches game methods through MonoMod, which uses
-Mono.Cecil to read assemblies.
+Mono.Cecil to read assemblies and iced to decode instructions.
 
-Both are distributed under the MIT License.
+All are distributed under the MIT License. The copyright lines below are taken
+from the shipped binaries themselves.
 
 
-MonoMod  (MonoMod.RuntimeDetour, MonoMod.Core, MonoMod.Utils, MonoMod.Iced,
-          MonoMod.Backports, MonoMod.ILHelpers)
-  Authors: 0x0ade, DaNike
+MonoMod  (MonoMod.RuntimeDetour, MonoMod.Core, MonoMod.Utils, MonoMod.Backports,
+          MonoMod.ILHelpers)
+  Copyright 2025 0x0ade, DaNike
+  Copyright 2024 0x0ade, DaNike   (MonoMod.Backports)
   https://github.com/MonoMod
   MIT License
 
 Mono.Cecil  (Mono.Cecil, Mono.Cecil.Mdb, Mono.Cecil.Pdb, Mono.Cecil.Rocks)
-  Author: Jb Evain
+  Copyright (c) 2008 - 2018 Jb Evain
   https://github.com/jbevain/cecil
   MIT License
+
+iced  (MonoMod.Iced)
+  Copyright (C) 2018-present iced project and contributors
+  https://github.com/icedland/iced
+  MIT License
+
+  Redistributed by MonoMod as MonoMod.Iced. It is a separate project from
+  MonoMod and carries its own copyright.
 
 
 MIT License terms
@@ -39,6 +49,13 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+
+Build Planner itself
+--------------------
+
+Copyright (c) 2026 Vito Pistelli, MIT License. See LICENSE in the source
+repository: https://github.com/viligante8/SpaceEngineers2BuildPlanner
 
 
 Not included

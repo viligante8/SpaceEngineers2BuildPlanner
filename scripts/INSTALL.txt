@@ -76,3 +76,16 @@ NOTES
 This plugin patches game methods at runtime, so a Space Engineers 2 update can
 break it. If it stops working after an update, check the log for a line saying
 a hook could not be installed, and look for a newer release.
+
+It runs entirely on your machine: it makes no network connections and writes
+nothing outside its own log folder above.
+
+
+LICENSE
+-------
+
+Build Planner is MIT licensed. Copyright (c) 2026 Vito Pistelli.
+Source: https://github.com/viligante8/SpaceEngineers2BuildPlanner
+
+Bundled MonoMod, Mono.Cecil and iced are MIT too - see THIRD-PARTY-NOTICES.txt.
+No Space Engineers 2 files are included or redistributed.
