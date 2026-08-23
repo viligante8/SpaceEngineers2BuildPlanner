@@ -21,7 +21,7 @@ public class BuildPlannerPlugin : IPlugin
     {
         // The version is the first thing any bug report needs: this plugin binds to method
         // signatures and private field names, so "which build is that log from" decides whether a
-        // failure is a known one already fixed or something new. Stamped by scripts/package.ps1
+        // failure is a known one already fixed or something new. Stamped by packaging/package.ps1
         // from the release tag; a local build reports whatever the csproj default is.
         Log.Write($"BuildPlanner {Version()} initializing...");
     }

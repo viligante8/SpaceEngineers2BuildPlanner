@@ -5,7 +5,7 @@ Releases are cut from a developer's machine. There is no CI.
 ## Cutting a release
 
 ```powershell
-.\scripts\package.ps1 -Version 1.0.0 -Publish
+.\packaging\package.ps1 -Version 1.0.0 -Publish
 ```
 
 That runs the unit tests, publishes, packages `dist\BuildPlanner-1.0.0.zip`, and creates a **draft**
@@ -17,7 +17,7 @@ plugin is hard to take back once people have downloaded it.
 To build a zip and nothing else — nothing leaves your machine:
 
 ```powershell
-.\scripts\package.ps1 -Version 1.0.0
+.\packaging\package.ps1 -Version 1.0.0
 ```
 
 It prints the `gh release create` line to run if you change your mind.

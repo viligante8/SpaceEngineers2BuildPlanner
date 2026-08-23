@@ -48,11 +48,11 @@
     With -Publish, publish the release immediately instead of leaving it as a draft.
 
 .EXAMPLE
-    .\scripts\package.ps1 -Version 1.0.0
+    .\packaging\package.ps1 -Version 1.0.0
     Build a zip into dist\ and stop. Nothing leaves your machine.
 
 .EXAMPLE
-    .\scripts\package.ps1 -Version 1.0.0 -Publish
+    .\packaging\package.ps1 -Version 1.0.0 -Publish
     Build, then create a DRAFT GitHub release with the zip attached.
 #>
 [CmdletBinding()]
