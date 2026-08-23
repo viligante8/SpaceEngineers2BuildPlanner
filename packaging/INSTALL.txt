@@ -80,6 +80,25 @@ This plugin patches game methods at runtime, so a Space Engineers 2 update can
 break it. If it stops working after an update, check the log for a line saying
 a hook could not be installed, and look for a newer release.
 
+A WORD OF CAUTION
+-----------------
+
+The launch option above tells the game to load a DLL, which then runs with the
+same access to your machine as the game itself. That is true of this mod and of
+every code mod, from anyone.
+
+Don't take my word for it that it's harmless, and don't make a habit of trusting
+random uploads. Everything below is a claim until you check it:
+
+  * Any .NET assembly decompiles back to readable C#. Open BuildPlanner.dll in a
+    free decompiler like ILSpy and read what it does - mine included.
+  * The full source is the GitHub repository below, at the tag matching this
+    download. You can build it yourself and run that instead.
+
+SECURITY.md in the repository has the exact commands, plus SHA-256 hashes for
+every bundled DLL so you can confirm they are the real MonoMod and Mono.Cecil.
+
+
 WHAT IT TOUCHES
 ---------------
 

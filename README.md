@@ -86,23 +86,33 @@ queue.
 Fun detail: that panel is Keen's. They built the whole thing and shipped it switched off. This mod
 just turns it on and feeds it.
 
-## What it touches
+## A word of caution
 
-It runs as code inside the game, so it's fair to ask.
+That launch option tells the game to load a DLL, which then runs with the same access to your
+machine as the game itself. That's true of this mod, and of every code mod, from anyone.
+
+**Don't take my word for it that it's harmless, and don't make a habit of trusting random uploads.**
+Everything below is a claim until you check it. Fortunately checking is easy:
+
+- The whole source is this repository, and the tag matching your download builds it. It's about
+  7,000 lines and the interesting parts are a few hundred.
+- Any .NET assembly decompiles back to readable C#. Open `BuildPlanner.dll` in a free decompiler
+  like [ILSpy](https://github.com/icsharpcode/ILSpy) and read what it actually does — mine included.
+- Or build it yourself and run that instead of my download.
+
+[SECURITY.md](SECURITY.md) walks through all three, with the exact commands and SHA-256 hashes for
+every bundled DLL.
+
+### What it does, for when you check
 
 No network connections. No processes started. No registry. It writes its own log, adds its nine
 bindings to your control options like any other rebindable key, and moves items around your world,
-which is the entire point.
-
-That's it. It doesn't open your saves, read your screenshots, or go anywhere else.
+which is the entire point. It doesn't open your saves, read your screenshots, or go anywhere else.
 
 **Your antivirus might grumble.** Changing game code in memory needs the same Windows calls an
 injector uses. Those live in MonoMod, the patching library most .NET game mods are built on;
 `BuildPlanner.dll` itself has zero native calls. The download isn't code-signed either, so
 SmartScreen may complain.
-
-[SECURITY.md](SECURITY.md) has the full breakdown plus commands to check all of it yourself,
-including SHA-256 hashes for every bundled DLL.
 
 ## Known limits
 

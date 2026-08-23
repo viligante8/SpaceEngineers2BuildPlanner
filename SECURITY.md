@@ -1,10 +1,22 @@
 # Security
 
-Build Planner is a **plugin**, not a data mod. It runs as code inside Space Engineers 2, patches
-engine methods at runtime, and reads private engine fields by reflection. That is a lot of trust to
-ask for a keybind mod.
+Build Planner is a **plugin**, not a data mod. The launch option tells the game to load a DLL, which
+then runs with the same access to your machine as the game itself. It patches engine methods at
+runtime and reads private engine fields by reflection. That is a lot of trust to ask for a keybind
+mod, and it is true of every code mod, from anyone.
 
-This page is how you check the claims instead of believing them.
+**Do not take my word for it that it is harmless, and do not make a habit of trusting random
+uploads.** Everything on this page is a claim until you check it, so here is how to check it.
+
+Three routes, in increasing order of effort:
+
+1. **Read the DLL.** Any .NET assembly decompiles back to readable C#. Open `BuildPlanner.dll` in
+   [ILSpy](https://github.com/icsharpcode/ILSpy) — free, no install needed for the portable build —
+   and read what it actually does. It is about 7,000 lines and the parts that touch your machine at
+   all are a few dozen.
+2. **Read the source.** It is this repository, at the tag matching your download. Same code, laid
+   out for humans rather than reconstructed by a decompiler.
+3. **Build it yourself** and run that instead of my download. Step 3 below.
 
 ## What it does and does not do
 
