@@ -141,9 +141,9 @@ That switches on the game's own input tracing, which logs every key the game acc
 Handy when a binding does nothing. It writes into the game's log rather than this one, which is why
 it's off unless you ask.
 
-If you want more detail at a specific moment, `SHIFT+ALT+CTRL+N` dumps the current state to the log:
+**Filing a bug?** Press `SHIFT+ALT+CTRL+N` first, then send the log. That dumps the current state:
 what's queued, which assemblers and containers it can actually reach, and what block it thinks
-you're looking at. That's usually enough to see why something didn't happen.
+you're looking at. It usually shows the problem outright, and it saves a round of back-and-forth.
 
 **After a game update.** This mod patches game methods by name, so a Keen patch can break it. Check
 the log for a hook that failed to install, then look for a newer release.
