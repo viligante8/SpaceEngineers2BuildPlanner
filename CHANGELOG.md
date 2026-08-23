@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.2 — 2026-08-23
+
+The first build with the 1.0.1 fixes actually exercised in game: plugin load and all ten hooks,
+deposit spilling from a full container into the next one on the same conveyor network, tools staying
+on the player, and the queue/withdraw/produce loop with the terminal panel.
+
+### Fixed
+
+- **A deposit now traces each container it fills.** The multi-container path added in 1.0.1 logged
+  nothing per transfer, so a spill from a full container into the next one left no evidence — the
+  only other output is the final item-type count, which reads identically whether one container took
+  everything or four shared it. That made the 1.0.1 fix impossible to verify from a log.
+
 ## 1.0.1 — 2026-08-23
 
 Maintenance release. **Use this instead of 1.0.0, which has been withdrawn.**
