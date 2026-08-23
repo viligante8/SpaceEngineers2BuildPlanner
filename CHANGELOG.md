@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.4 — 2026-08-23
+
+### Fixed
+
+- **The log is capped.** It was appended to across every launch and never trimmed, so it grew
+  without limit for the life of the install - measured at 1.8 MB after 49 launches, with nothing in
+  the code that would ever have stopped it. It now rolls at 4 MB keeping one previous file, so it
+  can never use more than 8 MB.
+- **Roughly 60% less logging by default.** Four line types - capturing and releasing the welder's UI
+  component, and claiming and releasing right-click - were 63% of a real 25,000-line log. They are
+  genuine state changes, but they happen every time you look at or away from a block, which is
+  continuously while building. They moved behind the existing `trace-input` flag, alongside the
+  engine's own input tracing, since both answer the same question. A session now costs roughly
+  13 KB instead of 36 KB.
+
 ## 1.0.3 — 2026-08-22
 
 An adversarial re-review of the 1.0.2 fixes found several of them wrong. This is the corrected set.

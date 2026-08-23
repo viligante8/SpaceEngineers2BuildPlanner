@@ -60,8 +60,11 @@ LOG
   %APPDATA%\SpaceEngineers2\BuildPlanner\BuildPlanner.log
 
 Include this file when reporting a problem - it records every action and the
-reason behind every refusal. Logging is verbose by default; to quieten it,
-create an empty file named "quiet" next to the log.
+reason behind every refusal. To quieten it, create an empty file named "quiet"
+next to the log.
+
+The log caps itself at 4 MB and keeps one previous file, so it will never use
+more than 8 MB however long you play.
 
 
 UNINSTALL

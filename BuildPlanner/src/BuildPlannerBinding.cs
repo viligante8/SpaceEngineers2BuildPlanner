@@ -326,7 +326,7 @@ internal static class BuildPlannerBinding
             if (_queueContext == null || _queueContext.IsActive) return;
 
             _queueContext.Activate();
-            Log.Debug("  debug: right-click claimed (welder active)");
+            Log.Trace("  trace: right-click claimed (welder active)");
         }
         catch (Exception ex)
         {
@@ -347,7 +347,7 @@ internal static class BuildPlannerBinding
             if (_queueContext == null || !_queueContext.IsActive) return;
 
             _queueContext.Deactivate();
-            Log.Debug("  debug: right-click released back to the game");
+            Log.Trace("  trace: right-click released back to the game");
         }
         catch (Exception ex)
         {

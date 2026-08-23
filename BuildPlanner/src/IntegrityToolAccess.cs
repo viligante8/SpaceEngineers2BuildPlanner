@@ -55,7 +55,7 @@ internal static class IntegrityToolAccess
         if (component == null) return;
 
         if (!ReferenceEquals(_current, component))
-            Log.Debug($"  debug: captured IntegrityToolUIComponent from {source}");
+            Log.Trace($"  trace: captured IntegrityToolUIComponent from {source}");
 
         _current = component;
 
@@ -72,7 +72,7 @@ internal static class IntegrityToolAccess
         {
             _current = null;
             BuildPlannerBinding.DisableQueueInput();
-            Log.Debug("  debug: released IntegrityToolUIComponent (removed from scene)");
+            Log.Trace("  trace: released IntegrityToolUIComponent (removed from scene)");
         }
     }
 

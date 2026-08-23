@@ -124,8 +124,12 @@ The log lives here:
 Every action writes a line, and so does every refusal, with the reason. If a key seems dead, the log
 will say why. Include it in bug reports, and note that its first line has the version.
 
-It's chatty by default. A restart plus a world load costs about five minutes, so it errs towards
-recording too much. Quieten it with an empty file next to it:
+It's reasonably chatty, because a restart plus a world load costs about five minutes and a run that
+failed to record something is worse than a slightly bigger file. It caps itself at 4 MB and keeps
+one previous file, so it can never take more than 8 MB no matter how long you play. Expect a few
+tens of KB per session.
+
+Quieten it further with an empty file next to it:
 
 ```
 %APPDATA%\SpaceEngineers2\BuildPlanner\quiet
@@ -137,9 +141,9 @@ There's an opt-in one too:
 %APPDATA%\SpaceEngineers2\BuildPlanner\trace-input
 ```
 
-That switches on the game's own input tracing, which logs every key the game accepts or throws away.
-Handy when a binding does nothing. It writes into the game's log rather than this one, which is why
-it's off unless you ask.
+That switches on the game's own input tracing, which logs every key the game accepts or throws away,
+plus this mod's own blow-by-blow of claiming and releasing right-click. Handy when a binding does
+nothing, and noisy enough that it's off unless you ask for it.
 
 **Filing a bug?** Press `SHIFT+ALT+CTRL+N` first, then send the log. That dumps the current state:
 what's queued, which assemblers and containers it can actually reach, and what block it thinks
