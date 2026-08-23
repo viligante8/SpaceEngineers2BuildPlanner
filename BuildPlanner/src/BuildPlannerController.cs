@@ -628,7 +628,24 @@ internal sealed class BuildPlannerController
             // that placed 100 of 500 plates and said only "deposited 1 item type(s)" is
             // success-shaped, and the player walks away still carrying 400 with no idea why. The
             // withdrawal has always distinguished its partial case; this is the same courtesy.
-            if (stillHeld) leftOver.Add(new ItemAmount(itemDef, source.CountItem(itemDef)));
+            //
+            // CountItem is guarded for the same reason HasItem above it is, and it matters more:
+            // this runs on precisely the path where HasItem just threw, against the same component
+            // and the same definition. Leaving it bare meant the guard above bought nothing - the
+            // rethrow would escape Deposit and cost the player their notification anyway.
+            if (!stillHeld) continue;
+
+            FixedPoint remaining = 0;
+            try
+            {
+                remaining = source.CountItem(itemDef);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"counting the remaining {itemDef.DisplayName} failed", ex);
+            }
+
+            if (remaining > 0) leftOver.Add(new ItemAmount(itemDef, remaining));
         }
 
         if (leftOver.Count > 0) _notifier.DepositedPartial(moved, leftOver);

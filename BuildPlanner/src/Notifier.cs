@@ -178,14 +178,6 @@ internal sealed class Notifier
         Info("Build Planner: you already have everything queued; nothing to produce");
 
     /// <summary>
-    /// Report a deposit by the number of item TYPES moved, which is what the caller counts.
-    ///
-    /// This said "stack(s)", which it never was: deposit de-duplicates by item definition and hands
-    /// each type over in one go, spread across as many containers as it takes. Five stacks of Steel
-    /// Plate leaving the player is one entry in that count, and calling it "1 stack" was simply a
-    /// wrong number on screen.
-    /// </summary>
-    /// <summary>
     /// A deposit that ran out of room. Reports what went in, then what is still being carried.
     ///
     /// Rows rather than one sentence, for the same reason as <see cref="WithdrewPartial"/>: the HUD
@@ -193,10 +185,26 @@ internal sealed class Notifier
     /// </summary>
     internal void DepositedPartial(int itemTypes, IReadOnlyList<ItemAmount> stillCarried)
     {
-        Deposited(itemTypes);
-        PerItem(stillCarried, "no room for", NotificationType.Error);
+        // Only when something actually moved. Deposited(0) renders "nothing to deposit", which
+        // paired with the rows below produced a flat contradiction on the headline case this method
+        // exists for: a full container gave "nothing to deposit" immediately followed by
+        // "still carrying 500x Steel Plate".
+        if (itemTypes > 0) Deposited(itemTypes);
+
+        // "still carrying", not "no room for". The remainder is a fact; the cause is not - the loop
+        // reaches here when containers were full, when a filter rejected the item, and when every
+        // transfer threw. Naming a cause we did not establish is how a log stops being trustworthy.
+        PerItem(stillCarried, "still carrying", NotificationType.Error);
     }
 
+    /// <summary>
+    /// Report a deposit by the number of item TYPES moved, which is what the caller counts.
+    ///
+    /// This said "stack(s)", which it never was: deposit de-duplicates by item definition and hands
+    /// each type over in one go, spread across as many containers as it takes. Five stacks of Steel
+    /// Plate leaving the player is one entry in that count, and calling it "1 stack" was simply a
+    /// wrong number on screen.
+    /// </summary>
     internal void Deposited(int itemTypes) =>
         Info(itemTypes > 0
             ? $"Build Planner: deposited {itemTypes} item type(s)"

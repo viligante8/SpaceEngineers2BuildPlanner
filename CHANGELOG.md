@@ -1,17 +1,53 @@
 # Changelog
 
-## 1.0.2 — 2026-08-22
+## 1.0.3 — 2026-08-22
 
-The first build with the 1.0.1 fixes actually exercised in game: plugin load and all ten hooks,
-deposit spilling from a full container into the next one on the same conveyor network, tools staying
-on the player, and the queue/withdraw/produce loop with the terminal panel.
+An adversarial re-review of the 1.0.2 fixes found several of them wrong. This is the corrected set.
 
 ### Fixed
 
-- **A deposit now traces each container it fills.** The multi-container path added in 1.0.1 logged
-  nothing per transfer, so a spill from a full container into the next one left no evidence — the
-  only other output is the final item-type count, which reads identically whether one container took
-  everything or four shared it. That made the 1.0.1 fix impossible to verify from a log.
+- **A missing `CloseHUD` no longer half-installs queueing.** `IntegrityToolAccess` clears its
+  captured tool in exactly one place, reached only from the `CloseHUD` detour. 1.0.2 made a missing
+  `CloseHUD` non-fatal, which installed two capture paths with nothing to release them - the capture
+  goes sticky and the next right-click queues a stale block outside welder mode, which is the exact
+  bug that hook was added to fix. Queueing now declines to install rather than installing broken.
+- **A missing `InputGameComponent.Init` no longer publishes dead controls or dead buttons.** Nine
+  rebindable actions wired to nothing, and four terminal buttons replaced by no-ops, are both worse
+  than not installing at all.
+- **Deposit reports partial results.** Placing 100 of 500 plates and saying only "deposited 1 item
+  type(s)" is success-shaped; the player walks away carrying 400 with no idea why. It now names what
+  is still carried, without asserting a cause it did not establish.
+- **Deposit tracing no longer stalls the game thread.** 1.0.2 logged one line per accepting
+  container, each a separate open/append/close under a lock, across every inventory on a conveyor
+  network. Totalled once per item type instead.
+- **`CountItem` and `HasItem` are both guarded.** 1.0.2 guarded one and left the other bare on the
+  same object, on the same path - so the guard bought nothing.
+- **Right-clicking a build-menu tile is never a silent no-op.**
+- **Engine-wide input tracing is opt-in.** It writes to the *game's* log for every session; it is
+  now behind a `trace-input` flag file.
+- **The release path-leak guard actually runs.** It sat above the file copy, so it never scanned the
+  two shipped text files, and it matched a bare user-name substring that both of those files contain
+  inside the project's own GitHub URL. It now runs after the copy, tests both a path shape and the
+  user name, and is scoped to files this project builds - the bundled MonoMod assemblies carry their
+  upstream maintainer's build paths, which are not ours to strip.
+
+### Added
+
+- `SECURITY.md` - what the plugin touches, and commands to verify each claim rather than trust it.
+- A `What it touches` section in the README, and an antivirus note. The safety claim previously
+  shipped only inside the zip, so it could not be read before taking the risk.
+
+### Documentation
+
+Five engine claims that did not survive a check against the shipped assemblies were corrected,
+including one in the "read this first" note that had `"Type": null` in an entity composite exactly
+backwards.
+
+## 1.0.2 — 2026-08-22
+
+Superseded by 1.0.3. Added per-container deposit tracing so the 1.0.1 multi-container fix could be
+verified from a log; 1.0.3 replaced it with a batched line after measuring what it cost the game
+thread.
 
 ## 1.0.1 — 2026-08-22
 

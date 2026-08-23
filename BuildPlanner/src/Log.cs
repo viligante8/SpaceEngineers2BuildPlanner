@@ -64,10 +64,6 @@ internal static class Log
     }
 
     /// <summary>
-    /// Whether the verbose flag file is present. Evaluated once: a filesystem probe on every log call
-    /// would run inside the input handler on the game thread.
-    /// </summary>
-    /// <summary>
     /// Whether verbose tracing is on. Exposed so callers can gate work that is only worth doing
     /// while diagnosing - not just the logging of it.
     /// </summary>
@@ -94,6 +90,10 @@ internal static class Log
         }
     }
 
+    /// <summary>
+    /// Whether the verbose flag file is absent. Evaluated once: a filesystem probe on every log call
+    /// would run inside the input handler on the game thread.
+    /// </summary>
     private static readonly bool DebugEnabled = ProbeDebugFlag();
 
     private static bool ProbeDebugFlag()

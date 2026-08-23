@@ -219,7 +219,18 @@ internal static class BlockMenuAccess
         //
         // built: null - nothing is placed yet, so the whole recipe is outstanding. That is the same
         // path a projection takes (BlockRequirements.Remaining).
-        BuildPlannerBinding.Controller?.QueueBlock(definition, built: null, displayName: SafeName(tile));
+        var controller = BuildPlannerBinding.Controller;
+        if (controller == null)
+        {
+            // Never a silent no-op. The controller is null only when InputGameComponent.Init could
+            // not be hooked, which a player has no way to guess at from a right-click that does
+            // nothing (CLAUDE.md, "A silent code path is a broken code path").
+            Log.Write("  build menu: right-click ignored, the Build Planner never bound"
+                      + " (see the startup log for the hook that failed)");
+            return;
+        }
+
+        controller.QueueBlock(definition, built: null, displayName: SafeName(tile));
     }
 
     /// <summary>

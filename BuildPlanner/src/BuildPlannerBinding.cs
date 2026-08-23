@@ -251,7 +251,7 @@ internal static class BuildPlannerBinding
         // control it consumes or discards - a file this mod does not own, for every player, every
         // session. It was invaluable while diagnosing input routing and has no value to anyone
         // else, so it is off unless explicitly asked for:
-        //     %APPDATA%\SpaceEngineers2\BuildPlanner	race-input
+        //     %APPDATA%\SpaceEngineers2\BuildPlanner\\trace-input
         if (Log.HasFlag("trace-input")) EnableEngineInputLogging(processorComponent);
         else Log.Debug("  debug: engine input tracing off (create 'trace-input' to enable)");
 

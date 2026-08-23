@@ -154,33 +154,60 @@ try {
     # MIT requires the notice to travel with the binaries we bundle.
     Copy-Item (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $publishDir
 
-    # Guard against absolute build paths coming back by any route.
+    # Guard against this machine's absolute build paths reaching the release.
     #
-    # Runs AFTER the payload files are copied, so everything that actually ships is scanned - an
-    # earlier revision sat above the Copy-Item calls and never looked at INSTALL.txt or
+    # Runs AFTER the payload files are copied, so everything we produce is scanned - an earlier
+    # revision sat above the Copy-Item calls and never looked at INSTALL.txt or
     # THIRD-PARTY-NOTICES.txt at all.
     #
-    # Matches a path SHAPE, not the bare user name. Both text files legitimately contain the
-    # GitHub URL github.com/viligante8/..., which contains this developer's user name as a
-    # substring - a `.Contains($env:USERNAME)` test fails every release on those two files while
-    # reporting a <PathMap> problem that does not exist.
+    # SCOPED TO WHAT WE BUILD. The bundled MonoMod assemblies carry their own maintainer's and CI
+    # build paths (/home/aaron/Documents/Source/MonoMod, /home/runner/work/MonoMod) baked in
+    # upstream. Those are not ours, not a leak of anything about this machine, and not ours to
+    # strip - scanning them only produces a guard that cries wolf every release. Their integrity is
+    # checked a better way, by hash, in SECURITY.md.
+    #
+    # TWO tests over our own files, because either alone has a hole:
+    #
+    #   * a path SHAPE, catching any user directory even on a machine whose name this script
+    #     never sees;
+    #   * the actual user name, catching a developer whose clone lives somewhere the shape test
+    #     does not know about - D:\dev\proj, a UNC share, a renamed home.
+    #
+    # The name test skips the shipped text files: both legitimately contain the GitHub URL
+    # github.com/viligante8/..., and $env:USERNAME is a substring of that account name. Testing
+    # them for the bare name fails every release while blaming <PathMap>, which is what an earlier
+    # revision of this guard did.
     #
     # Reads bytes as Latin-1 so every byte maps to a character: ASCII decoding turns bytes >= 0x80
-    # into '?', which would hide a non-ASCII user name. UTF-16 literals are scanned by stripping
-    # interleaved nulls.
-    # [char]92 is a backslash. Written this way so the pattern cannot be mangled by a tool
-    # that rewrites escape sequences on its way into this file.
+    # into '?', which would hide a non-ASCII user name. Each file is re-tested with interleaved
+    # nulls stripped, to catch UTF-16 string literals.
     $bs = [string][char]92
-    $pathPattern = '[A-Za-z]:' + [regex]::Escape($bs) + '(Users|home)' + [regex]::Escape($bs)
+    $shapePattern = '([A-Za-z]:' + [regex]::Escape($bs) + 'Users' + [regex]::Escape($bs) + '|/home/|/Users/)'
     $latin1 = [Text.Encoding]::GetEncoding(28591)
+    $textPayload = @('INSTALL.txt', 'THIRD-PARTY-NOTICES.txt')
 
-    $leakedPaths = Get-ChildItem $publishDir -File -Recurse | Where-Object {
+    $namePattern = $null
+    if ($env:USERNAME) { $namePattern = [regex]::Escape($env:USERNAME) }
+
+    $ourFiles = Get-ChildItem $publishDir -File -Recurse |
+        Where-Object { $_.Name -like 'BuildPlanner.*' -or $textPayload -contains $_.Name }
+
+    $leakedPaths = $ourFiles | Where-Object {
         $text = $latin1.GetString([IO.File]::ReadAllBytes($_.FullName))
-        ($text -match $pathPattern) -or (($text -replace "`0", '') -match $pathPattern)
+        $flat = $text -replace "`0", ''
+
+        $hit = ($text -match $shapePattern) -or ($flat -match $shapePattern)
+
+        if (-not $hit -and $namePattern -and ($textPayload -notcontains $_.Name)) {
+            $hit = ($text -match $namePattern) -or ($flat -match $namePattern)
+        }
+
+        $hit
     }
 
     if ($leakedPaths) {
-        throw "Refusing to package: absolute build paths are embedded in $($leakedPaths.Name -join ', '). Check <PathMap> in BuildPlanner.csproj."
+        $names = ($leakedPaths | ForEach-Object { $_.FullName.Substring($publishDir.Length).TrimStart($bs) }) -join ', '
+        throw "Refusing to package: absolute build paths or the build user name are embedded in $names. Check <PathMap> in BuildPlanner.csproj."
     }
 
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

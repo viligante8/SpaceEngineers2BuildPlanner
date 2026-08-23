@@ -94,7 +94,8 @@ It changes three things:
   * your world - it moves items between inventories and queues recipes at
     assemblers, which is what the controls do.
 
-It does not read or write your saves, screenshots, or anything else.
+Beyond those three it touches nothing: it does not open your save files
+directly, read your screenshots, or go anywhere else on your machine.
 
 
 IF YOUR ANTIVIRUS COMPLAINS

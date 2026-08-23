@@ -36,7 +36,7 @@ lot of trust to ask, so here is the whole of it.
 | Network connections | **None.** No socket, no HTTP, no DNS. |
 | Starting processes | **None.** |
 | Registry | **None.** |
-| Files it reads | Only its own folder: the optional `quiet` and `queries.txt` flags. |
+| Files it reads | Only its own folder: the optional `quiet`, `trace-input` and `queries.txt` flags. |
 | Files it writes | Its own log, **plus** your control bindings (below). |
 | Bundled binaries | Unmodified MonoMod and Mono.Cecil from NuGet. |
 
@@ -108,7 +108,7 @@ up there rather than the shipped default.
 
 ## Controls
 
-The nine keyboard and mouse actions below are separate input actions, each separately rebindable
+The nine input actions below are separate and each separately rebindable
 — see "Rebinding". The chords are only the defaults.
 
 Queueing from the build menu is the exception: it is hooked at the menu's own UI handlers rather
@@ -405,8 +405,19 @@ Silence it by creating an empty file (no rebuild, no launch-option change):
 ```
 
 Read once per run, so create it before launching. Every branch still reports *something* with the
-flag set (CLAUDE.md, "A silent code path is a broken code path"); it only drops the supporting
-detail.
+flag set - a silent code path is indistinguishable from one that never ran - so this only drops
+the supporting detail.
+
+There is one **opt-in** flag alongside it:
+
+```
+%APPDATA%\SpaceEngineers2\BuildPlanner\trace-input
+```
+
+Create that and the mod switches on the engine's own input tracing, which records every control
+the game consumes or discards. It goes in the **game's** log, not this one, and it is invaluable
+when a keybind appears to do nothing. Off by default precisely because it writes to a file this
+mod does not own.
 
 ## Tests
 

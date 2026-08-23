@@ -29,7 +29,8 @@ This page is how you check the claims instead of believing them.
    any action, so nothing that works is removed - every real binding has a real ID.
 3. **Your world save** - inventory contents and assembler queues, exactly as the controls describe.
 
-It does not read or write your saves, screenshots, or anything else on your machine.
+Beyond those three it touches nothing: it does not open your save files directly, read your
+screenshots, or go anywhere else on your machine.
 
 ## Verify it yourself
 
@@ -69,7 +70,13 @@ dotnet nuget verify *.nupkg --all
 ```
 
 Each must report a valid repository signature from `CN=NuGet.org Repository by Microsoft`. Then
-unzip each and hash `lib\net9.0\*.dll` (`lib\netstandard2.0\*.dll` for Cecil), and compare.
+unzip each and hash the DLLs, and compare. Note which framework folder each ships from:
+
+| Package | Folder |
+|---|---|
+| MonoMod.RuntimeDetour, MonoMod.Core (which also contains MonoMod.Iced), MonoMod.Utils | `lib\net9.0\` |
+| MonoMod.Backports, MonoMod.ILHelpers | `lib\net8.0\` - neither ships a net9.0 build |
+| Mono.Cecil and its three siblings | `lib\netstandard2.0\` |
 
 > The `sha512` values in `BuildPlanner.deps.json` will **not** match the `.nupkg.sha512` files in
 > your NuGet cache. That is expected: deps.json records NuGet's *content* hash, while
@@ -86,7 +93,8 @@ ilspycmd -r . .\bp\BuildPlanner.dll |
 ```
 
 Expect **zero matches**. The only I/O types the assembly references anywhere are `System.IO.File`,
-`Directory` and `Path`. Its P/Invoke count is **0**.
+`Directory`, `Path` and `DirectoryInfo` - the last being the discarded return type of
+`Directory.CreateDirectory`, which creating the log folder needs. Its P/Invoke count is **0**.
 
 ### 3. Check the DLL was built from this source
 
@@ -96,9 +104,11 @@ the same commit rebuilds to the same bytes:
 ```powershell
 git clone https://github.com/viligante8/SpaceEngineers2BuildPlanner
 cd SpaceEngineers2BuildPlanner
-git checkout v1.0.3
+git checkout v1.0.3          # the tag matching the release you downloaded
 .\packaging\package.ps1 -Version 1.0.3
 ```
+
+Use the version you actually downloaded; `git tag` lists the tags that exist.
 
 Hash the resulting `BuildPlanner.dll` and compare it with the one in the release.
 

@@ -71,13 +71,22 @@ internal sealed class BuildPlannerInstaller
     /// <summary>
     /// Install every hook the mod needs.
     ///
-    /// **Each group is installed independently, and a failure in one never stops the others.**
-    /// The hooks bind to method names and signatures, so a Space Engineers 2 patch that renames one
-    /// method is the expected way this breaks — and the features are unrelated to each other. An
-    /// earlier revision returned from this method as soon as any lookup failed, so a renamed
-    /// <c>SetMapping</c> silently took the welder hook, the build menu and the terminal panel down
-    /// with it, while the log reported only that key bindings might reset. Losing one feature after
-    /// a patch is acceptable; losing four and being told about one is not.
+    /// **Each group is installed independently unless one genuinely depends on another**, and a
+    /// failure never takes down a feature that could still have worked. The hooks bind to method
+    /// names and signatures, so a Space Engineers 2 patch renaming one is the expected way this
+    /// breaks. An early revision returned as soon as any lookup failed, so a renamed
+    /// <c>SetMapping</c> silently took the welder hook, the build menu and the terminal panel with
+    /// it while reporting only that key bindings might reset.
+    ///
+    /// Two couplings are real and deliberate, and both are enforced here rather than left to chance:
+    /// <list type="bullet">
+    /// <item>no tool-capture hook without <c>CloseHUD</c>, which is the only thing that releases the
+    /// capture (see <see cref="InstallIntegrityToolHook"/>);</item>
+    /// <item>no keybinds and no terminal button hooks without <c>InputGameComponent.Init</c>, which
+    /// is the only thing that creates the controller they all call into.</item>
+    /// </list>
+    /// Losing one feature after a patch is acceptable. Publishing controls that cannot fire, or
+    /// replacing working buttons with no-ops, is not.
     /// </summary>
     internal void Install(PluginHost host)
     {
@@ -95,14 +104,23 @@ internal sealed class BuildPlannerInstaller
             // wired to nothing: a menu full of controls that silently do nothing is worse than a
             // menu with no entry at all.
             //
-            // Everything after it is independent and still installed - the build menu and the
-            // terminal panel do not route through the input system.
+            // The terminal's four button hooks are skipped as well, for the same reason and not by
+            // accident. They do not route through the input system, but they do route through
+            // BuildPlannerBinding.Controller, which Attach is the only thing that ever assigns - so
+            // with Init gone they resolve null on every press. And because they REPLACE Keen's own
+            // verbs rather than wrapping them, installing them here would turn four working buttons
+            // into guaranteed no-ops. That is exactly the harm the skipped keybinds avoid, one
+            // screen over.
+            //
+            // The panel itself is still revealed, and the build menu and welder hooks still install:
+            // those report their own failure when the controller is missing.
             Log.Write("  ERROR: InputGameComponent.Init not found;"
-                      + " keybinds are DISABLED and will not appear in Options -> Controls");
+                      + " keybinds are DISABLED, will not appear in Options -> Controls,"
+                      + " and the terminal panel's buttons are left to the game");
 
             InstallIntegrityToolHook();
             InstallBuildMenuHooks();
-            InstallTerminalPanelHook();
+            InstallTerminalPanelHook(installVerbHooks: false);
             return;
         }
 
@@ -144,7 +162,7 @@ internal sealed class BuildPlannerInstaller
     /// <c>InitializeComponent</c> is the moment the screen's XAML has just been built, which is the
     /// earliest point the panel exists to be found.
     /// </summary>
-    private void InstallTerminalPanelHook()
+    private void InstallTerminalPanelHook(bool installVerbHooks = true)
     {
         var initializeComponent = typeof(TerminalScreenView).GetMethod(
             "InitializeComponent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
@@ -161,11 +179,13 @@ internal sealed class BuildPlannerInstaller
             Log.Write("  hook installed on TerminalScreen.InitializeComponent");
         }
 
-        // Installed regardless: the verbs live on the view MODEL, so they are reachable even when
-        // the view hook above could not be found. If Keen ever finishes the panel themselves it
-        // becomes visible without our reveal, and its buttons must still route at this mod rather
-        // than at the half-built shipped implementations.
-        InstallTerminalVerbHooks();
+        // Installed even when the view hook above could not be found: the verbs live on the view
+        // MODEL, so they stay reachable, and if Keen ever finishes the panel themselves its buttons
+        // must still route at this mod rather than at the half-built shipped implementations.
+        //
+        // NOT installed when the caller says the controller will never exist - see Install().
+        if (installVerbHooks) InstallTerminalVerbHooks();
+        else Log.Write("  terminal panel buttons left to the game (no controller to route them to)");
     }
 
     /// <summary>
@@ -348,16 +368,13 @@ internal sealed class BuildPlannerInstaller
     }
 
     /// <summary>
-    /// Capture the component that feeds the block tooltip.
+    /// Queueing: capture the component that feeds the block tooltip, and release it again.
     ///
     /// This is how the Build Planner learns what block the player is aiming at. Two earlier routes
     /// failed in game: BlockPlacerEntityComponent could not be located at all, and the interacted-
     /// entity provider returned the press-F target rather than the crosshair block. UpdateUI runs on
     /// the component that populates the "you need N x Steel Plate" panel, so hooking it hands us the
     /// exact instance the game is already using - no lookup, no guessing where it lives.
-    /// </summary>
-    /// <summary>
-    /// Queueing: capture the component that feeds the block tooltip, and release it again.
     ///
     /// **The capture hooks and the release hook stand or fall together.** `IntegrityToolAccess`
     /// clears its captured component in exactly one place — `Release`, reached only from the
