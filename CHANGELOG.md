@@ -2,6 +2,26 @@
 
 ## 1.0.4 — 2026-08-23
 
+### Added
+
+- **Withdraw and deposit now work through any conveyor port**, not only through blocks that hold
+  something themselves. Aim at a conveyor tube, a junction, a sorter or a Survival Kit and the mod
+  pulls from everything on that network, the way SE1's Build Planner did.
+
+  Reported by a player aiming at a Survival Kit and being told it was "not a container", who
+  reasonably guessed small conveyors were filtering components out. Neither was the cause: an
+  in-game component dump showed the Survival Kit is a respawn point with a conveyor port and no
+  inventory at all, so there was genuinely nothing to pull from it - while the containers behind it
+  were unreachable because the walk could only start from an inventory.
+
+  It now starts from the block's conveyor node instead, via the node-based overload of
+  `IterateReachableInventories`. Every port on the block is walked and the results merged, since a
+  block can carry several that do not lead to the same place.
+
+- **A clearer refusal.** "Not looking at a container" covered both aiming at nothing and aiming at
+  something that turned out to be empty. The second now names the block and says nothing was
+  reachable through it.
+
 ### Fixed
 
 - **The log is capped.** It was appended to across every launch and never trimmed, so it grew

@@ -274,7 +274,7 @@ internal sealed class BuildPlannerController
         {
             // Aiming at something real that simply holds nothing, which is a different problem from
             // aiming at nothing - and the one a player is most likely to misdiagnose.
-            _notifier.TargetHoldsNothing(DescribeBlock(target));
+            _notifier.NothingReachable(DescribeBlock(target));
             return;
         }
 
@@ -548,7 +548,7 @@ internal sealed class BuildPlannerController
         var destinations = InventorySources.CollectFrom(target);
         if (destinations.Count == 0)
         {
-            _notifier.TargetHoldsNothing(DescribeBlock(target));
+            _notifier.NothingReachable(DescribeBlock(target));
             return;
         }
 

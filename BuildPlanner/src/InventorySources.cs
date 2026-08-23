@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks;
 using Keen.Game2.Simulation.WorldObjects.CubeBlocks.Production.ItemConverters;
+using Keen.Game2.Simulation.WorldObjects.CubeBlocks.ResourceDistribution.Conveyors;
 using Keen.Game2.Simulation.WorldObjects.CubeGrids.ResourceDistribution.Conveyors;
 using Keen.Game2.Simulation.WorldObjects.CubeGrids.ResourceDistribution.Inventories;
 using Keen.Game2.Simulation.WorldObjects.Items;
@@ -55,16 +56,18 @@ internal static class InventorySources
             var direct = own.Count > 0 ? own[0] : null;
 
             // Then everything that can reach it across the conveyor network.
-            if (direct == null)
-            {
-                // Without an inventory on the aimed block there is no node to start the walk from,
-                // so there is nothing to widen to. Reported rather than returning an empty list
-                // silently: "no target" and "target has no inventory" have different fixes.
-                Log.Write("  Build Planner: that block has no inventory to pull through");
-                return sources;
-            }
+            //
+            // Starting from the block's own inventory when it has one, and from its conveyor PORT
+            // when it does not. A Survival Kit is the case that forced this: it is a respawn point
+            // with a conveyor port and no inventory at all, so aiming at one used to refuse
+            // outright even though the network behind it was full of components. Reported by a
+            // player, who reasonably guessed small conveyors were filtering things out.
+            //
+            // The same applies to every port-only block - conveyor tubes, junctions, sorters.
+            // SE1's Build Planner pulled through any connected port, and so does this now.
+            var reached = direct != null ? Reachable(direct) : ReachableFromPorts(target);
 
-            foreach (var inventory in Reachable(direct))
+            foreach (var inventory in reached)
             {
                 if (inventory == null || sources.Contains(inventory)) continue;
                 sources.Add(inventory);
@@ -105,6 +108,82 @@ internal static class InventorySources
     /// The start inventory is excluded by the enumerator (it is passed as <c>ignoreInventory</c>), so
     /// callers add it themselves — which is what puts the aimed container first in the list.
     /// </remarks>
+    /// <summary>
+    /// Every inventory reachable through a block's own conveyor ports, for blocks that hold nothing.
+    /// </summary>
+    /// <remarks>
+    /// <c>IterateReachableInventories</c> has a second overload taking a conveyor NODE rather than
+    /// an inventory, which is what makes this possible at all. Getting to a node:
+    /// <list type="number">
+    /// <item><c>ConveyorComponent</c> on the block, whose <c>ConveyorSystem</c> is the grid's
+    /// network - null when the block is not plumbed into anything;</item>
+    /// <item>its <c>ConveyorSubgraph.Nodes</c>, whose indices are the "local node id within the
+    /// block's subgraph" that <c>GetNodeBySubgraphId</c> documents;</item>
+    /// <item><c>HasNodeWithSubgraphId</c> before every lookup, so an index that is not a real node
+    /// is skipped rather than resolved into the wrong one.</item>
+    /// </list>
+    /// Every port is walked and the results merged, because a block can carry several and they need
+    /// not lead to the same place - a connector bridging two grids is the obvious case.
+    /// </remarks>
+    private static List<InventoryComponent> ReachableFromPorts(Entity block)
+    {
+        var reachable = new List<InventoryComponent>();
+
+        var conveyor = block.TryGet<ConveyorComponent>();
+        if (conveyor == null)
+        {
+            Log.Write($"  '{block.DebugName}' holds nothing and has no conveyor port;"
+                      + " there is nothing to pull through it");
+            return reachable;
+        }
+
+        var system = conveyor.ConveyorSystem;
+        if (system == null)
+        {
+            Log.Write($"  '{block.DebugName}' has a conveyor port but is not on a network");
+            return reachable;
+        }
+
+        var subgraph = conveyor.ConveyorSubgraph;
+        // Nodes is a struct, so it cannot be null-conditionalised - only the subgraph can.
+        var ports = subgraph == null ? 0 : subgraph.Nodes.Count;
+        if (ports == 0)
+        {
+            Log.Write($"  '{block.DebugName}' reports no conveyor nodes");
+            return reachable;
+        }
+
+        var walked = 0;
+
+        for (var subgraphId = 0; subgraphId < ports; subgraphId++)
+        {
+            try
+            {
+                if (!system.HasNodeWithSubgraphId(block.DEntity, subgraphId)) continue;
+
+                var node = system.GetNodeBySubgraphId(block.DEntity, subgraphId);
+                walked++;
+
+                // followEdgeDirection: false - "search inventories that can reach start", the same
+                // direction the inventory-based walk uses, and the correct one for a withdrawal.
+                foreach (var inventory in ConveyorSystemComponent.IterateReachableInventories(
+                             node, system, null, followEdgeDirection: false))
+                {
+                    if (inventory != null && !reachable.Contains(inventory)) reachable.Add(inventory);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"walking conveyor port {subgraphId} of '{block.DebugName}' failed", ex);
+            }
+        }
+
+        Log.Write($"  '{block.DebugName}' holds nothing; pulled through {walked} of its"
+                  + $" {ports} conveyor port(s) and reached {reachable.Count} inventory/inventories");
+
+        return reachable;
+    }
+
     private static IEnumerable<InventoryComponent> Reachable(InventoryComponent start)
     {
         var reachable = new List<InventoryComponent>();

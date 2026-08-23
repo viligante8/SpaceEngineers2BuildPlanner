@@ -67,9 +67,10 @@ the whole recipe.
 
 Area welders queue everything they're covering in one go.
 
-**Withdrawing.** Aim at any container on the grid and press `N`. You get the difference between what
-you need and what you're already carrying, pulled from anywhere on that conveyor network. If there
-isn't enough, you get what there is and the queue stays put so you can come back.
+**Withdrawing.** Aim at anything plumbed into the conveyor network and press `N`. A container, an
+assembler, a conveyor tube, a survival kit, whatever's in front of you. You get the difference
+between what you need and what you're already carrying, pulled from everywhere on that network. If
+there isn't enough, you get what there is and the queue stays put so you can come back.
 
 **Producing.** `SHIFT+N` while looking at an assembler, or anything conveyor-connected to one,
 queues up the components you're short of. You don't need to queue the sub-parts. Ask for Steel
