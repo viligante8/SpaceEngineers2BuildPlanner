@@ -28,9 +28,9 @@ To uninstall, remove the launch option and delete the folder. Full instructions 
 
 ## Status
 
-**The core loop works, confirmed in-game 2026-08-22.** Aim at an unfinished block with a welder →
-right-click to queue → aim at a container → press N → exactly the missing components arrive, in the
-amounts the game's own block panel shows.
+**Working and confirmed in game.** Aim at an unfinished block with a welder, right-click to queue,
+aim at a container, press `N` — exactly the missing components arrive, in the amounts the game's own
+block panel shows.
 
 ```
 notify: Build Planner: queued Light Armor Cube (1 total)
@@ -38,22 +38,11 @@ requires 30 x Steel Plate
 notify: Build Planner: withdrew 30x Steel Plate
 ```
 
-Getting there took three wrong turns, all recorded in `notes/build-planner-api.md`. The one worth
-knowing: the queue summed `CubeBlockRecipeDefinition.CriticalItems`, which the XML docs define as
-*proportions* used "to generate the final recipe based on mass, efficiency and rounding" — not a
-component count. A 2.5m armour cube therefore asked for 1 Steel Plate instead of 30, and since the
-withdrawal is exact, the player got exactly one. The correct field is
-`CubeBlockDefinition.Items` — "computed when definition is post-processed".
+The full loop is confirmed end to end: queue a block, `SHIFT+N` to produce, wait for the assembler
+and the sub-recipes it delegates, then `N` to withdraw exactly what was made.
 
-**SHIFT-produce works, confirmed in-game 2026-08-22**, including the engine's sub-component cascade:
-enqueueing a component recipe at an assembler made the engine raise the ingot and ore sub-recipes on
-connected converters by itself. See "Producing components".
-
-**The full loop is confirmed end to end:** queue a block, `SHIFT+N` to produce, wait for the
-assembler and its delegated sub-recipes to finish, then `N` to withdraw exactly what was made.
-
-Testing produce also exposed a reach bug that had been present in the withdrawal all along — see
-"Fixed: reach ignored conveyors entirely".
+Version history is in [CHANGELOG.md](CHANGELOG.md). How the engine actually behaves — including the
+three wrong turns it took to get here — is in [notes/](notes/).
 
 ## Running it
 
@@ -341,88 +330,6 @@ The cost is that vanilla's three middle-click actions are suppressed while *plai
 bound to a Build Planner action. The chorded variants cost nothing — no vanilla action uses
 CTRL/ALT/SHIFT + middle-click.
 
-## Working
-
-- Queue of planned blocks, merged component totals, ×10 multiplier
-- **Exact shortfall** via the engine's own `InventoryComponent.FindMissingItems`
-- Withdrawal from the aimed container plus the grid's conveyor network
-- Deposit-all
-- **Production** at a conveyor-reachable assembler, with the engine cascading sub-components
-- Outcome reported on every path (withdrew / partial / nothing found / nothing queued / no target)
-- Nine separately rebindable actions in the controls menu, chords included
-
-## Verified in game
-
-Everything in the control table above, plus: components for partly-built blocks (the outstanding
-amount, not a full recipe), projections, the placement-mode guard, the pause guard, deposit keeping
-your tools, and HUD notifications.
-
-**The terminal panel, end to end (2026-08-22).** Revealed and bound on every terminal open; the list
-tracks queueing live; the ten-item cap engages; **Produce** reaches converters across the conveyor
-network (`3 item converter(s) conveyor-reachable from 'CargoContainer750_ServerComposition'` →
-recipes enqueued at `Smelter250_ServerComposition`) and leaves the queue intact; left-click produces
-one block; right-click removes one, including consecutive removes that re-index correctly; **Clear**
-empties it. A complete withdrawal empties the panel, a partial one deliberately does not.
-
-## Previously awaiting verification (all now confirmed)
-
-Kept as a record of what was uncertain and how each was settled — not as an outstanding list.
-
-1. **Projections.** Queueing now reads the welder's own target rather than hunting for the block
-   placer, and the tool component that supplies it also owns the projection state, so projections
-   should flow through the same path.
-   *Test:* right-click a projected (holographic) block; expect `queued <block> (N total)`.
-2. **HUD notifications.** `InGameUI` is borrowed from `InventoryNotificationsSessionComponent._ui`
-   (a private field, confirmed against `Game2.Client.dll` metadata) on the **client** session, then
-   `InGameUI.ShowNotification(HudNotification)` is called.
-   *Test:* any action — the message should appear on screen, not only in the log. Every failure to
-   reach the HUD logs its own reason (`notify: …`) and still records the message.
-3. **Terminal queue visibility.** The queue is mirrored into `BuildPlannerData`, and
-   `TerminalPlannerPanel` reveals the panel Keen shipped hidden and feeds it that data.
-   *Test:* queue a few blocks, then open the terminal (F) and look bottom-right for a "Build Planner"
-   box listing them.
-4. **Placement-mode guard.** Right-click used to queue while in block/projection placement mode,
-   where the game already uses RMB. The captured tool component is now released on the tool's own
-   `CloseHUD`, and queueing additionally requires its block panel (`_screen`) to be open.
-   *Test:* enter placement mode and right-click — nothing should be queued; then switch back to the
-   welder and confirm queueing still works.
-
-## Fixed: reach ignored conveyors entirely (2026-08-22)
-
-Fixed and confirmed in-game 2026-08-22.
-
-**Symptom, from a test run:** an empty container welded onto a ship but *plumbed to nothing* still
-withdrew from the whole ship and still queued work at its assemblers. A standalone container on its
-own grid correctly reported nothing available.
-
-**Root cause.** Both sweeps used `InventorySystemComponent.Inventories`, which is not the conveyor
-network despite the name. It is filled by `OnBlocksChanged` -> `AddInventories(block)` for every
-block on the grid, so conveyor plumbing never enters into it. The separate-grid case worked only
-because a different grid has a different `InventorySystemComponent` — the right answer for the wrong
-reason, which is why it looked correct.
-
-The engine never uses that set to move anything. `PullAsync`, `PushAllAsync` and
-`TransferByDefAsync` all iterate the conveyor graph instead:
-
-```csharp
-// InventorySystemComponent.PullAsync
-foreach (var inv in ConveyorSystemComponent.IterateReachableInventories(
-             invTo, itemDef, followEdgeDirection: false, mustContainTheItem: true))
-```
-
-**Fix.** `InventorySources.Reachable` now walks
-`ConveyorSystemComponent.IterateReachableInventories(start, null, followEdgeDirection: false)` —
-`followEdgeDirection: false` being documented as "search inventories that **can reach** start", the
-correct direction for a withdrawal and one that honours one-way topology. `filterItem: null` ignores
-per-item filters, so the walk runs once per action rather than once per item.
-
-**Both** sweeps were fixed, not just the reported one: withdrawal and the assembler search shared the
-mistake, so an unattached container could also dispatch production. The converter search now also
-matches how the engine scopes its own delegation (`conveyorGroup.Blocks`).
-
-Transfers still use `TransferByDef`, which is unchanged and already verified — only the choice of
-which inventories are eligible moved.
-
 ## Known limitations (decided, not oversights)
 
 **Queue range is the welder's reach.** You must be close enough that the block panel is showing,
@@ -543,7 +450,7 @@ step with MSB3021 while it runs.
 ## Releasing
 
 ```powershell
-.\scripts\package.ps1 -Version 1.0.0 -Publish
+.\packaging\package.ps1 -Version 1.0.0 -Publish
 ```
 
 Tests, packages, and creates a **draft** GitHub release with the zip attached. Drop `-Publish` to
@@ -557,10 +464,10 @@ and does not contain.
 
 ## Background
 
-- `notes/client-server-split.md` — the two-session architecture. **Read this first.**
-- `notes/build-planner-api.md` — verified engine API surface
-- `notes/build-planner-ux-spec.md` — the SE1 behaviour being reproduced
-- `CLAUDE.md` — project rules, including hard-won plugin and debugging lessons
+- [notes/](notes/) — everything learned about the engine, indexed. Start with
+  `client-server-split.md`: two sessions run in-process, and only one has the inventory.
+- [CHANGELOG.md](CHANGELOG.md) — version history
+- [CLAUDE.md](CLAUDE.md) — project conventions, plugin loading, and the runtime-debugging lessons
 
 Being a plugin bound to method signatures, an SE2 update can break it. If it stops loading after a
 patch, read the log first.

@@ -584,7 +584,7 @@ Also handled for free:
 **Scope is the conveyor group, not the grid.** `EnsureConnectedConverterCacheIsUpdated` iterates
 `_conveyorComponent.ConveyorSystem.TryGetGroup(Entity.DEntity).Blocks`. The mod's own converter
 search is grid-wide (it reuses the withdrawal's `InventorySystemComponent.Inventories` sweep), so
-the two differ — recorded as a known gap in `BuildPlanner/README.md`.
+the two differ — recorded as a known gap in `README.md`.
 
 ### Item → recipe
 
