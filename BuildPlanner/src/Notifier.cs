@@ -62,6 +62,21 @@ internal sealed class Notifier
 
     internal void NoTarget() => Warning("Build Planner: not looking at a container");
 
+    /// <summary>
+    /// The player IS aiming at a block, but it holds nothing and nothing is reachable through it.
+    /// </summary>
+    /// <remarks>
+    /// Reported by a player aiming at a Survival Kit: "it tells me it's not a container", followed
+    /// by a reasonable but wrong guess that small conveyors were filtering components out.
+    ///
+    /// The Survival Kit is a respawn point with a conveyor port and no inventory of its own - its
+    /// server entity carries eleven components and <c>InventoryComponent</c> is not among them.
+    /// "Not looking at a container" was technically true and sent them hunting the wrong problem,
+    /// so the message now names the block and says what is actually missing.
+    /// </remarks>
+    internal void TargetHoldsNothing(string blockName) =>
+        Warning($"Build Planner: {blockName} holds nothing - aim at a container");
+
     internal void NothingToQueue() => Warning("Build Planner: not looking at an unfinished block");
 
     internal void AlreadyHaveEverything() => Info("Build Planner: you already have everything queued");

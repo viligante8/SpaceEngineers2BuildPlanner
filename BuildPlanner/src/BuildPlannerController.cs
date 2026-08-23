@@ -272,7 +272,9 @@ internal sealed class BuildPlannerController
         var sources = InventorySources.CollectFrom(target);
         if (sources.Count == 0)
         {
-            _notifier.NoTarget();
+            // Aiming at something real that simply holds nothing, which is a different problem from
+            // aiming at nothing - and the one a player is most likely to misdiagnose.
+            _notifier.TargetHoldsNothing(DescribeBlock(target));
             return;
         }
 
@@ -486,6 +488,26 @@ internal sealed class BuildPlannerController
         ClearQueue();
     }
 
+    /// <summary>
+    /// A readable name for an aimed block, for messages that need to say which one.
+    /// </summary>
+    /// <remarks>
+    /// DebugName is what the engine offers here and it carries composition suffixes -
+    /// "SurvivalKit250_ServerComposition". Those are noise to a player, so they are trimmed; what
+    /// is left still names the block recognisably.
+    /// </remarks>
+    private static string DescribeBlock(Entity? entity)
+    {
+        var name = entity?.DebugName;
+        if (string.IsNullOrWhiteSpace(name)) return "that block";
+
+        foreach (var suffix in new[] { "_ServerComposition", "_ClientComposition", "_Server", "_Client" })
+            if (name.EndsWith(suffix, StringComparison.Ordinal))
+                return name.Substring(0, name.Length - suffix.Length);
+
+        return name;
+    }
+
     private static string Describe(CubeBlockDefinition? block)
         => block?.UIData?.Name.ToString() ?? "block";
 
@@ -517,10 +539,16 @@ internal sealed class BuildPlannerController
         }
 
         var target = GetAimedEntity(character);
+        if (target == null)
+        {
+            _notifier.NoTarget();
+            return;
+        }
+
         var destinations = InventorySources.CollectFrom(target);
         if (destinations.Count == 0)
         {
-            _notifier.NoTarget();
+            _notifier.TargetHoldsNothing(DescribeBlock(target));
             return;
         }
 
