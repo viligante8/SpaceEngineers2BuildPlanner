@@ -180,21 +180,84 @@ internal sealed class Notifier
     /// <summary>
     /// A deposit that ran out of room. Reports what went in, then what is still being carried.
     ///
-    /// Rows rather than one sentence, for the same reason as <see cref="WithdrewPartial"/>: the HUD
-    /// trims free text at its one-line width, and the remainder is the half the player most needs.
+    /// **One row for the whole remainder, not one per item.** Reported in game: a deposit that left
+    /// both Cobalt and Silicon behind showed only the Silicon. The log proved both notifications
+    /// were raised ("still carrying 1348x Cobalt" / "still carrying 3140x Silicon"), so the HUD
+    /// dropped one - `MaterialNotificationConfiguration.MaxStackCount` is 2 in vanilla, and it is
+    /// the only notification configuration the game ships.
+    ///
+    /// Rather than depend on exactly how the HUD stacks and queues rows, this raises a single
+    /// notification, which no stack cap can truncate. The remainder is the one thing the player must
+    /// not lose - it is the whole reason this method exists - so it must not be the thing competing
+    /// for the last slot.
+    ///
+    /// Width is bounded instead: the HUD does not wrap, so the list is capped and the overflow
+    /// summarised. The full per-item breakdown always goes to the log.
     /// </summary>
     internal void DepositedPartial(int itemTypes, IReadOnlyList<ItemAmount> stillCarried)
     {
         // Only when something actually moved. Deposited(0) renders "nothing to deposit", which
-        // paired with the rows below produced a flat contradiction on the headline case this method
+        // paired with the remainder produced a flat contradiction on the headline case this method
         // exists for: a full container gave "nothing to deposit" immediately followed by
         // "still carrying 500x Steel Plate".
         if (itemTypes > 0) Deposited(itemTypes);
 
+        if (stillCarried == null || stillCarried.Count == 0) return;
+
+        // Full detail to the log regardless of what fits on screen.
+        foreach (var item in stillCarried)
+            if (item.Item != null)
+                Log.Debug($"  debug: still carrying {(int)item.Amount} x {item.Item.DisplayName}");
+
         // "still carrying", not "no room for". The remainder is a fact; the cause is not - the loop
         // reaches here when containers were full, when a filter rejected the item, and when every
         // transfer threw. Naming a cause we did not establish is how a log stops being trustworthy.
-        PerItem(stillCarried, "still carrying", NotificationType.Error);
+        Text(DescribeRemainder(stillCarried), NotificationType.Error);
+    }
+
+    /// <summary>
+    /// "still carrying 1348x Cobalt, 3140x Silicon", trimmed to fit one HUD line.
+    /// </summary>
+    /// <remarks>
+    /// The HUD notification is NoWrap between a 317 and 480 pixel width, so roughly sixty
+    /// characters survive. Two items fit comfortably; beyond that the rest are counted rather than
+    /// named, which is honest at a glance and keeps the number the player needs - how much is still
+    /// on them - visible for every item in the log.
+    /// </remarks>
+    private static string DescribeRemainder(IReadOnlyList<ItemAmount> items)
+    {
+        var pairs = new List<(string Name, int Amount)>(items.Count);
+        foreach (var item in items)
+            if (item.Item != null)
+                pairs.Add((item.Item.DisplayName.ToString(), (int)item.Amount));
+
+        return DescribeRemainder(pairs);
+    }
+
+    /// <summary>
+    /// The formatting itself, over plain name/amount pairs so it can be unit-tested -
+    /// <see cref="ItemDefinition"/> cannot be constructed outside a loaded game, and the truncation
+    /// rule is the part that can silently regress.
+    /// </summary>
+    internal static string DescribeRemainder(IReadOnlyList<(string Name, int Amount)> items)
+    {
+        const int Shown = 2;
+
+        if (items == null || items.Count == 0) return "Build Planner: nothing was deposited";
+
+        var named = new List<string>(Shown);
+        var extra = 0;
+
+        foreach (var (name, amount) in items)
+        {
+            if (named.Count < Shown) named.Add($"{amount}x {name}");
+            else extra++;
+        }
+
+        var listed = string.Join(", ", named);
+        return extra > 0
+            ? $"still carrying {listed} +{extra} more"
+            : $"still carrying {listed}";
     }
 
     /// <summary>

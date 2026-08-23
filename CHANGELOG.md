@@ -22,6 +22,12 @@ An adversarial re-review of the 1.0.2 fixes found several of them wrong. This is
   network. Totalled once per item type instead.
 - **`CountItem` and `HasItem` are both guarded.** 1.0.2 guarded one and left the other bare on the
   same object, on the same path - so the guard bought nothing.
+- **The deposit remainder is one notification, not one per item.** Reported in game: a deposit that
+  left both Cobalt and Silicon behind showed only the Silicon. The log proved both had been raised,
+  so the HUD dropped one - `MaterialNotificationConfiguration.MaxStackCount` is 2, and it is the
+  only notification configuration the game ships. The remainder is the one thing a player must not
+  lose, so it no longer competes for the last slot. Long lists are capped and counted; the full
+  breakdown is always in the log.
 - **Right-clicking a build-menu tile is never a silent no-op.**
 - **Engine-wide input tracing is opt-in.** It writes to the *game's* log for every session; it is
   now behind a `trace-input` flag file.

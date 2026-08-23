@@ -426,7 +426,7 @@ cd BuildPlanner.Tests
 dotnet test
 ```
 
-61 tests, covering the logic that is decidable without the game running:
+67 tests, covering the logic that is decidable without the game running:
 
 | Unit | Why it is tested |
 |---|---|
