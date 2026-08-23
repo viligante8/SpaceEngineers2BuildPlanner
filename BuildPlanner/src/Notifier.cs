@@ -185,6 +185,18 @@ internal sealed class Notifier
     /// Plate leaving the player is one entry in that count, and calling it "1 stack" was simply a
     /// wrong number on screen.
     /// </summary>
+    /// <summary>
+    /// A deposit that ran out of room. Reports what went in, then what is still being carried.
+    ///
+    /// Rows rather than one sentence, for the same reason as <see cref="WithdrewPartial"/>: the HUD
+    /// trims free text at its one-line width, and the remainder is the half the player most needs.
+    /// </summary>
+    internal void DepositedPartial(int itemTypes, IReadOnlyList<ItemAmount> stillCarried)
+    {
+        Deposited(itemTypes);
+        PerItem(stillCarried, "no room for", NotificationType.Error);
+    }
+
     internal void Deposited(int itemTypes) =>
         Info(itemTypes > 0
             ? $"Build Planner: deposited {itemTypes} item type(s)"

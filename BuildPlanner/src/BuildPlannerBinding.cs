@@ -245,7 +245,15 @@ internal static class BuildPlannerBinding
         _processor = processor;
         processor.ActivateContext(_context);
 
-        EnableEngineInputLogging(processorComponent);
+        // OPT-IN, unlike this plugin's own tracing.
+        //
+        // This flips a flag on the ENGINE's input processor, making the GAME's log record every
+        // control it consumes or discards - a file this mod does not own, for every player, every
+        // session. It was invaluable while diagnosing input routing and has no value to anyone
+        // else, so it is off unless explicitly asked for:
+        //     %APPDATA%\SpaceEngineers2\BuildPlanner	race-input
+        if (Log.HasFlag("trace-input")) EnableEngineInputLogging(processorComponent);
+        else Log.Debug("  debug: engine input tracing off (create 'trace-input' to enable)");
 
         // One trigger per action, so what the player rebinds is what runs. The `performs` local is
         // deliberate: capturing the loop variable's action inside the lambda is what keeps each

@@ -6,6 +6,7 @@ using Keen.Game2.Simulation.WorldObjects.Items;
 using Keen.Game2.Simulation.WorldObjects.Tools;
 using Keen.VRage.Core.Game.Systems;
 using Keen.VRage.DCS.Components;
+using Keen.VRage.Library.Mathematics;
 
 namespace BuildPlanner;
 
@@ -524,6 +525,7 @@ internal sealed class BuildPlannerController
         }
 
         var moved = 0;
+        var leftOver = new List<ItemAmount>();
 
         // Snapshot what to move first: transferring mutates the inventory being iterated.
         var toMove = new List<ItemDefinition>();
@@ -559,7 +561,18 @@ internal sealed class BuildPlannerController
             // partway through - the player keeps a part-stack and nothing says why, while a second
             // container on the same conveyor network sits empty. The withdrawal has always walked
             // its sources this way; deposit did not, and the asymmetry was the bug.
-            var movedThisItem = false;
+            //
+            // Totalled and logged ONCE per item type, after the sweep - never once per container.
+            //
+            // Log.Write opens, appends and closes the file under a lock on every call (~0.2 ms), and
+            // this loop can touch every inventory on a large conveyor network. A line per accepting
+            // container turned a deposit into tens of milliseconds of synchronous file I/O on the
+            // game thread - the tracing meant to make this fix observable was itself the stall.
+            // The container count preserves the one fact the line exists to show: that the spill
+            // happened at all.
+            FixedPoint depositedTotal = 0;
+            var containersUsed = 0;
+            var stillHeld = true;
 
             foreach (var destination in destinations)
             {
@@ -570,12 +583,8 @@ internal sealed class BuildPlannerController
                     var amount = source.TransferByDef(destination, itemDef, null, null, true);
                     if (amount > 0)
                     {
-                        // Per-container, matching the withdrawal's own tracing. Without this the
-                        // spill from a full container into the next one leaves no evidence: the
-                        // only other output is the final item-type count, which is identical
-                        // whether one container took everything or four shared it.
-                        Log.Debug($"  debug: deposited {(int)amount} x {itemDef.DisplayName}");
-                        movedThisItem = true;
+                        depositedTotal += amount;
+                        containersUsed++;
                     }
                 }
                 catch (Exception ex)
@@ -586,13 +595,44 @@ internal sealed class BuildPlannerController
                 // Nothing of this type left to place; the rest of the containers are irrelevant.
                 // HasItem is documented as "whether the inventory contain specific item with
                 // quantity greater than zero", which is exactly the question here.
-                if (!source.HasItem(itemDef)) break;
+                //
+                // Outside the try above deliberately? No - see below. A throw here would skip the
+                // player's notification entirely, which is the silent failure this project exists
+                // to avoid.
+                bool stillHolding;
+                try
+                {
+                    stillHolding = source.HasItem(itemDef);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error($"checking the remaining {itemDef.DisplayName} failed", ex);
+                    break;
+                }
+
+                if (!stillHolding)
+                {
+                    stillHeld = false;
+                    break;
+                }
             }
 
-            if (movedThisItem) moved++;
+            if (containersUsed > 0)
+            {
+                Log.Debug($"  debug: deposited {(int)depositedTotal} x {itemDef.DisplayName}"
+                          + $" across {containersUsed} container(s)");
+                moved++;
+            }
+
+            // Ran out of containers while still carrying some. Reported, never swallowed: a deposit
+            // that placed 100 of 500 plates and said only "deposited 1 item type(s)" is
+            // success-shaped, and the player walks away still carrying 400 with no idea why. The
+            // withdrawal has always distinguished its partial case; this is the same courtesy.
+            if (stillHeld) leftOver.Add(new ItemAmount(itemDef, source.CountItem(itemDef)));
         }
 
-        _notifier.Deposited(moved);
+        if (leftOver.Count > 0) _notifier.DepositedPartial(moved, leftOver);
+        else _notifier.Deposited(moved);
     }
 
     /// <summary>

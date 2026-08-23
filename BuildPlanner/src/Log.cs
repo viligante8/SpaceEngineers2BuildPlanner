@@ -67,6 +67,33 @@ internal static class Log
     /// Whether the verbose flag file is present. Evaluated once: a filesystem probe on every log call
     /// would run inside the input handler on the game thread.
     /// </summary>
+    /// <summary>
+    /// Whether verbose tracing is on. Exposed so callers can gate work that is only worth doing
+    /// while diagnosing - not just the logging of it.
+    /// </summary>
+    internal static bool IsVerbose => DebugEnabled;
+
+    /// <summary>
+    /// Whether a named opt-in flag file sits next to the log.
+    /// </summary>
+    /// <remarks>
+    /// Opt-IN, unlike <c>quiet</c>. Used for switches that change something the mod does not own -
+    /// the engine's own input trace writes into the GAME's log, for every session, so it must not
+    /// be on by default the way this plugin's own tracing is.
+    /// </remarks>
+    internal static bool HasFlag(string name)
+    {
+        try
+        {
+            var dir = Path.GetDirectoryName(LogPath);
+            return dir != null && File.Exists(Path.Combine(dir, name));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static readonly bool DebugEnabled = ProbeDebugFlag();
 
     private static bool ProbeDebugFlag()
