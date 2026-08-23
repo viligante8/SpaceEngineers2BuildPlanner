@@ -86,16 +86,28 @@ internal sealed class BuildPlannerInstaller
 
         if (init == null)
         {
-            // Fatal to input specifically: without this there is no context and no keybind. The
-            // rest is still installed, because right-click queueing and the terminal panel do not
-            // route through it.
-            Log.Write("  ERROR: InputGameComponent.Init not found; keybinds not bound");
+            // Fatal to the keybinds specifically. BuildPlannerBinding.Attach runs only from this
+            // detour, and it is the sole creator of the input context and the controller - so
+            // without it no trigger can ever fire.
+            //
+            // The SetMapping hook below is therefore skipped too. On its own it would still publish
+            // nine actions into Options -> Controls, where the player could rebind keys that are
+            // wired to nothing: a menu full of controls that silently do nothing is worse than a
+            // menu with no entry at all.
+            //
+            // Everything after it is independent and still installed - the build menu and the
+            // terminal panel do not route through the input system.
+            Log.Write("  ERROR: InputGameComponent.Init not found;"
+                      + " keybinds are DISABLED and will not appear in Options -> Controls");
+
+            InstallIntegrityToolHook();
+            InstallBuildMenuHooks();
+            InstallTerminalPanelHook();
+            return;
         }
-        else
-        {
-            _initHook = new Hook(init, HookedInit);
-            Log.Write("  hook installed on InputGameComponent.Init");
-        }
+
+        _initHook = new Hook(init, HookedInit);
+        Log.Write("  hook installed on InputGameComponent.Init");
 
         // ControlCustomizationEngineComponent owns the mapping: it keeps _baseMappings and rebuilds
         // the processor's mapping from it whenever custom binds change. Adding our action straight
@@ -344,10 +356,42 @@ internal sealed class BuildPlannerInstaller
     /// the component that populates the "you need N x Steel Plate" panel, so hooking it hands us the
     /// exact instance the game is already using - no lookup, no guessing where it lives.
     /// </summary>
+    /// <summary>
+    /// Queueing: capture the component that feeds the block tooltip, and release it again.
+    ///
+    /// **The capture hooks and the release hook stand or fall together.** `IntegrityToolAccess`
+    /// clears its captured component in exactly one place — `Release`, reached only from the
+    /// `CloseHUD` detour. Installing a capture path without that releaser makes the capture sticky:
+    /// the tool stays "live" after the player leaves welder mode, and the next right-click queues a
+    /// stale block in block-placement mode, where right-click already means something else. That is
+    /// verbatim the bug `CloseHUD` was hooked to fix.
+    ///
+    /// So a missing `CloseHUD` disables queueing rather than half-installing it. Everything outside
+    /// this method — the build menu, the terminal panel, the withdraw/produce keybinds — is
+    /// independent and is still installed.
+    /// </summary>
     private void InstallIntegrityToolHook()
     {
-        var updateUI = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent).GetMethod(
-            "UpdateUI", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        const BindingFlags Flags = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public;
+        var toolType = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent);
+
+        // CloseHUD first: it is the releaser, and without it nothing else here may be installed.
+        var closeHud = toolType.GetMethod("CloseHUD", Flags);
+
+        if (closeHud == null)
+        {
+            Log.Write("  ERROR: IntegrityToolUIComponent.CloseHUD not found;"
+                      + " queueing is DISABLED (capturing the welder's target without a way to"
+                      + " release it would queue stale blocks outside welder mode)");
+            return;
+        }
+
+        _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
+        Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
+
+        // UpdateUI runs the component that populates the "you need N x Steel Plate" panel, so
+        // hooking it hands us the exact instance the game is already using - no lookup, no guessing.
+        var updateUI = toolType.GetMethod("UpdateUI", Flags);
 
         if (updateUI == null)
         {
@@ -360,23 +404,6 @@ internal sealed class BuildPlannerInstaller
             Log.Write("  hook installed on IntegrityToolUIComponent.UpdateUI");
         }
 
-        // CloseHUD is the tool saying "I am no longer showing a block". Without this the captured
-        // component stays live after the player switches to block placement mode, where right-click
-        // already means something else - queueing there was the reported bug.
-        var closeHud = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent).GetMethod(
-            "CloseHUD", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-
-        if (closeHud == null)
-        {
-            Log.Write("  WARNING: IntegrityToolUIComponent.CloseHUD not found;" +
-                      " queueing may fire outside welder mode");
-        }
-        else
-        {
-            _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
-            Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
-        }
-
         // The area welder refreshes through a different path entirely.
         //
         // UpdateUI runs for a plain welder (OnEntityChanged / OnNewDetectionArrived), but an area
@@ -386,8 +413,7 @@ internal sealed class BuildPlannerInstaller
         //
         // AreaDetectionChanged is hooked rather than UpdateAreaUI because it is a plain void method;
         // UpdateAreaUI is `async void`, so a detour there returns at its first await anyway.
-        var areaDetectionChanged = typeof(Keen.Game2.Client.WorldObjects.Tools.IntegrityToolUIComponent)
-            .GetMethod("AreaDetectionChanged", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+        var areaDetectionChanged = toolType.GetMethod("AreaDetectionChanged", Flags);
 
         if (areaDetectionChanged == null)
         {
