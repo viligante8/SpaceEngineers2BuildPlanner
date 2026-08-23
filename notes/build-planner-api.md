@@ -72,8 +72,14 @@ IterateReachableInventories(InventoryComponent, ItemDefinition, bool, bool)
 `GetClosestParentOrSelfWith<PersistentRequestProcessorComponent>()`.
 
 The **character has neither** `ItemRequesterComponent` nor `PersistentRequestProcessorComponent`.
-`CompositeCharacterServer.def` (guid `4cc16aab-0c8b-4196-9a2d-0d8bc33fe89e`) has `InventoryComponent`
-under tag slot `"Inventory"` only.
+`CompositeCharacterServer.def` (guid `4cc16aab-0c8b-4196-9a2d-0d8bc33fe89e`) declares three
+inventory tag slots, not one: `Inventory`, `ConsumableInventory` and `DatapadInventory`.
+`ConsumableInventory` and `DatapadInventory` name
+`Game2:Keen.Game2.Simulation.WorldObjects.Items.InventoryComponent` explicitly; `Inventory` - the
+main one - uses `"Type": null` and resolves through its `Definition` instead
+(`CharacterInventory.def`, `MaxMass: 8400`). An earlier revision of this line read "under tag slot
+`Inventory` only", which had it backwards; see `client-server-split.md` on why `Type: null` is not
+an absent component.
 
 `ItemRequesterComponent` binds its inventory by tag: `[Component("InventoryRequester")]`.
 
@@ -156,7 +162,7 @@ See `client-server-split.md` for the full account. Summary:
   `Session` via `Get<WorldSessionComponent>().OwnedSession`.
 - Inventories live on the **server** session's character; the block placer and UI live on the
   **client** session's. Both characters report the debug name `CompositeCharacterServer`.
-- `Session.GetEntitiesOfType<T>()` is public; `QueryAllEntities()` is internal.
+- `Session.GetEntitiesOfType<T>()` is public; `QueryAllEntities()` is private.
 - `entity.FirstOrDefault<T>()` resolves interfaces; `TryGet<T>(StringId tag)` needs the tag.
 - Use `SessionComponents.TryGet<T>()`, never `Get<T>()` — the server session has
   `PlayersSessionComponent` where the client has `ClientPlayersSessionComponent`, and `Get` throws.
@@ -274,7 +280,10 @@ Steel Plate" is a *plausible* answer — it never looked like a parse failure, a
 investigation after a block-identity bug instead.
 
 Related, on the same definition: `TotalItemAmount`, `OptionalItemAmount`, `RecipeEfficiency`,
-`RecipeRoundingConfiguration`. Whether `Items` includes optional components is **not yet confirmed**.
+`RecipeRoundingConfiguration`. **`Items` DOES include optional components** - `CubeBlockDefinition.ComputeRecipeAmounts` appends `Recipe.CriticalItems` and then the optional
+list into the same builder before `Items = itemAmounts.DrainToImmutable()`, and tracks the split
+only as the separate totals `TotalItemAmount` / `OptionalItemAmount`. So queueing a block asks
+for its optional components too - the same set Keen's own `TryScheduleBlockForProduction` uses.
 
 ## Finding what the player is aiming at (2026-08-22)
 
@@ -1018,7 +1027,7 @@ notification per item, and `HUDNotificationCollectionViewModel` is built for tha
 - `TryUpdateNotification` matches an existing row by `Name` and calls `Update`, which does
   `Amount += notification.Amount.Value` and resets the timer — repeats coalesce onto one row instead
   of stacking.
-- `MaterialNotificationConfiguration.MaxStackCount` defaults to **3**; beyond that notifications wait
+- `MaterialNotificationConfiguration.MaxStackCount` is **2**; beyond that notifications wait
   in `_notificationQueue` until an earlier one expires. Emitting five text lines therefore hides the
   first two until later.
 - Amount and name are separate bound fields, so neither competes for the single line of width that

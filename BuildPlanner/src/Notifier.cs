@@ -87,7 +87,7 @@ internal sealed class Notifier
     /// width that free text has to fit into.
     ///
     /// Withdrawing twice therefore updates one row instead of filling the stack, which matters:
-    /// <c>MaterialNotificationConfiguration.MaxStackCount</c> is 3, and anything beyond it waits in a
+    /// <c>MaterialNotificationConfiguration.MaxStackCount</c> is 2 in vanilla, and anything beyond it waits in a
     /// queue until an earlier notification expires.
     /// </summary>
     private void Gained(IReadOnlyList<ItemAmount> items)

@@ -83,14 +83,29 @@ InvalidCastException: Unable to cast 'PlayersSessionComponent' to 'ClientPlayers
   `Component` types and needs the tag when a composite defines one.
 - **`Session.GetEntitiesOfType<T>()`** is public and is how mission code
   (`ItemsInPlayerInventoryProgressTrackerComponent`) finds players. `Session.QueryAllEntities()` is
-  internal — not usable from a plugin.
+  private — not usable from a plugin.
 - **`HierarchyComponent.Children`** is public, so descendants are walkable;
   `entity.Data.TryGet<ParentData>(out var d)` then `d.GetEntity(entity.Scene)` walks up. Neither
   helped here — the inventory was on the other *session*, not elsewhere in the graph — but the
   traversal code is in `PlayerAccess` if needed.
-- A tag slot in an `EntityCompositeDefinition` can name a `Definition` with **`"Type": null`**, as
-  `CompositeCharacterServer.def` does for its `"Inventory"` slot. Such a slot has no component at
-  all, so no tagged lookup will ever find it. Do not infer component presence from the composite.
+- **`"Type": null` in a composite does NOT mean "no component".** It means the component type is
+  resolved from the `Definition` the slot names. This note previously claimed the opposite, and the
+  claim was wrong.
+
+  Traced in full: `CompositeCharacterServer.def`'s `"Inventory"` tag slot maps to component GUID
+  `a6f8013a-3c5d-4b45-f3f5-ce59dbd5e17e`, whose entry is
+  `{"Definition": "fe9df47f-5673-4253-b797-54635d4f3f42", "Type": null}` -
+  and `fe9df47f` is `Assets/Characters/System/CharacterInventory.def`, an
+  `InventoryDefinitionObjectBuilder` with `MaxMass: 8400` and
+  `InventoryName: "CharacterInventoryName"`. `PrefabCharacterServer.def` then fills that same slot
+  with an `InventoryObjectBuilder` carrying the starting items.
+
+  So the slot called empty here is the character's **main inventory**. `CharacterComponent` uses the
+  identical `Type: null` pattern, which is the tell that should have caught this: a composite whose
+  character has no character component is not a plausible reading.
+
+  The real lesson stands, just for a different reason - do not infer component presence from the
+  composite alone. Resolve the `Definition`, and confirm against a live entity's component list.
 
 ## Diagnostic technique that actually worked
 
