@@ -68,6 +68,17 @@ internal sealed class BuildPlannerInstaller
     private static Hook? _produceBlockHook;
     private static Hook? _removeBlockHook;
 
+    /// <summary>
+    /// Install every hook the mod needs.
+    ///
+    /// **Each group is installed independently, and a failure in one never stops the others.**
+    /// The hooks bind to method names and signatures, so a Space Engineers 2 patch that renames one
+    /// method is the expected way this breaks — and the features are unrelated to each other. An
+    /// earlier revision returned from this method as soon as any lookup failed, so a renamed
+    /// <c>SetMapping</c> silently took the welder hook, the build menu and the terminal panel down
+    /// with it, while the log reported only that key bindings might reset. Losing one feature after
+    /// a patch is acceptable; losing four and being told about one is not.
+    /// </summary>
     internal void Install(PluginHost host)
     {
         var init = typeof(InputGameComponent).GetMethod(
@@ -75,12 +86,16 @@ internal sealed class BuildPlannerInstaller
 
         if (init == null)
         {
-            Log.Write("  ERROR: InputGameComponent.Init not found; input not bound");
-            return;
+            // Fatal to input specifically: without this there is no context and no keybind. The
+            // rest is still installed, because right-click queueing and the terminal panel do not
+            // route through it.
+            Log.Write("  ERROR: InputGameComponent.Init not found; keybinds not bound");
         }
-
-        _initHook = new Hook(init, HookedInit);
-        Log.Write("  hook installed on InputGameComponent.Init");
+        else
+        {
+            _initHook = new Hook(init, HookedInit);
+            Log.Write("  hook installed on InputGameComponent.Init");
+        }
 
         // ControlCustomizationEngineComponent owns the mapping: it keeps _baseMappings and rebuilds
         // the processor's mapping from it whenever custom binds change. Adding our action straight
@@ -95,12 +110,14 @@ internal sealed class BuildPlannerInstaller
 
         if (setMapping == null)
         {
-            Log.Write("  WARNING: ControlCustomization.SetMapping not found; key binding may be reset");
-            return;
+            Log.Write("  WARNING: ControlCustomization.SetMapping not found;"
+                      + " keybinds may be reset and may not appear in Options -> Controls");
         }
-
-        _setMappingHook = new Hook(setMapping, HookedSetMapping);
-        Log.Write("  hook installed on ControlCustomizationEngineComponent.SetMapping");
+        else
+        {
+            _setMappingHook = new Hook(setMapping, HookedSetMapping);
+            Log.Write("  hook installed on ControlCustomizationEngineComponent.SetMapping");
+        }
 
         InstallIntegrityToolHook();
         InstallBuildMenuHooks();
@@ -125,12 +142,17 @@ internal sealed class BuildPlannerInstaller
         {
             Log.Write("  WARNING: TerminalScreen.InitializeComponent(bool) not found;" +
                       " the queue will not be visible in the terminal");
-            return;
+        }
+        else
+        {
+            _terminalScreenHook = new Hook(initializeComponent, HookedTerminalInitializeComponent);
+            Log.Write("  hook installed on TerminalScreen.InitializeComponent");
         }
 
-        _terminalScreenHook = new Hook(initializeComponent, HookedTerminalInitializeComponent);
-        Log.Write("  hook installed on TerminalScreen.InitializeComponent");
-
+        // Installed regardless: the verbs live on the view MODEL, so they are reachable even when
+        // the view hook above could not be found. If Keen ever finishes the panel themselves it
+        // becomes visible without our reveal, and its buttons must still route at this mod rather
+        // than at the half-built shipped implementations.
         InstallTerminalVerbHooks();
     }
 
@@ -329,12 +351,14 @@ internal sealed class BuildPlannerInstaller
 
         if (updateUI == null)
         {
-            Log.Write("  ERROR: IntegrityToolUIComponent.UpdateUI not found; queueing will not work");
-            return;
+            Log.Write("  ERROR: IntegrityToolUIComponent.UpdateUI not found;"
+                      + " queueing with a plain welder will not work");
         }
-
-        _integrityToolHook = new Hook(updateUI, HookedUpdateUI);
-        Log.Write("  hook installed on IntegrityToolUIComponent.UpdateUI");
+        else
+        {
+            _integrityToolHook = new Hook(updateUI, HookedUpdateUI);
+            Log.Write("  hook installed on IntegrityToolUIComponent.UpdateUI");
+        }
 
         // CloseHUD is the tool saying "I am no longer showing a block". Without this the captured
         // component stays live after the player switches to block placement mode, where right-click
@@ -346,11 +370,12 @@ internal sealed class BuildPlannerInstaller
         {
             Log.Write("  WARNING: IntegrityToolUIComponent.CloseHUD not found;" +
                       " queueing may fire outside welder mode");
-            return;
         }
-
-        _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
-        Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
+        else
+        {
+            _integrityToolCloseHook = new Hook(closeHud, HookedCloseHUD);
+            Log.Write("  hook installed on IntegrityToolUIComponent.CloseHUD");
+        }
 
         // The area welder refreshes through a different path entirely.
         //
