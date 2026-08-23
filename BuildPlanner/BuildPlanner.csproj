@@ -17,9 +17,13 @@
 
       Without this the compiler stamps the full build path into the assembly (the debug directory
       entry pointing at obj\Release\BuildPlanner.pdb) and into the SourceLink document map, so a
-      released DLL published the machine's user name to everyone who downloaded it. PathMap rewrites
-      those to project-relative paths; Deterministic makes the output independent of where it was
-      built, which is what makes the rewrite complete rather than partial.
+      released DLL published the machine's user name to everyone who downloaded it.
+
+      PathMap alone does the rewriting. Deterministic is stated explicitly only to pin it: the .NET
+      SDK already defaults it to true (Microsoft.NET.Sdk.props), so this changes nothing today and
+      exists so that a future SDK default cannot quietly reintroduce build-machine variation.
+
+      packaging/package.ps1 verifies the result on the real bytes rather than trusting either.
     -->
     <PathMap>$(MSBuildProjectDirectory)=BuildPlanner</PathMap>
     <Deterministic>true</Deterministic>

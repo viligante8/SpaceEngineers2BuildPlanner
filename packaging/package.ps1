@@ -150,23 +150,38 @@ try {
     # needs a mapped stack trace can build the same tagged commit and get a matching pdb locally.
     Get-ChildItem $publishDir -Filter *.pdb | Remove-Item -Force
 
-    # Guard against the leak coming back by any other route. Checked on the real bytes rather than
-    # trusting the csproj, because this is the property that actually matters to a stranger.
-    $userName = $env:USERNAME
-    if ($userName) {
-        $leakedPaths = Get-ChildItem $publishDir -File | Where-Object {
-            $bytes = [IO.File]::ReadAllBytes($_.FullName)
-            $text = [Text.Encoding]::ASCII.GetString($bytes)
-            $text.Contains($userName) -or $text.Contains('C:\Users\')
-        }
-        if ($leakedPaths) {
-            throw "Refusing to package: absolute build paths are embedded in $($leakedPaths.Name -join ', '). Check <PathMap> in BuildPlanner.csproj."
-        }
-    }
-
     Copy-Item (Join-Path $PSScriptRoot "INSTALL.txt") -Destination $publishDir
     # MIT requires the notice to travel with the binaries we bundle.
     Copy-Item (Join-Path $PSScriptRoot "THIRD-PARTY-NOTICES.txt") -Destination $publishDir
+
+    # Guard against absolute build paths coming back by any route.
+    #
+    # Runs AFTER the payload files are copied, so everything that actually ships is scanned - an
+    # earlier revision sat above the Copy-Item calls and never looked at INSTALL.txt or
+    # THIRD-PARTY-NOTICES.txt at all.
+    #
+    # Matches a path SHAPE, not the bare user name. Both text files legitimately contain the
+    # GitHub URL github.com/viligante8/..., which contains this developer's user name as a
+    # substring - a `.Contains($env:USERNAME)` test fails every release on those two files while
+    # reporting a <PathMap> problem that does not exist.
+    #
+    # Reads bytes as Latin-1 so every byte maps to a character: ASCII decoding turns bytes >= 0x80
+    # into '?', which would hide a non-ASCII user name. UTF-16 literals are scanned by stripping
+    # interleaved nulls.
+    # [char]92 is a backslash. Written this way so the pattern cannot be mangled by a tool
+    # that rewrites escape sequences on its way into this file.
+    $bs = [string][char]92
+    $pathPattern = '[A-Za-z]:' + [regex]::Escape($bs) + '(Users|home)' + [regex]::Escape($bs)
+    $latin1 = [Text.Encoding]::GetEncoding(28591)
+
+    $leakedPaths = Get-ChildItem $publishDir -File -Recurse | Where-Object {
+        $text = $latin1.GetString([IO.File]::ReadAllBytes($_.FullName))
+        ($text -match $pathPattern) -or (($text -replace "`0", '') -match $pathPattern)
+    }
+
+    if ($leakedPaths) {
+        throw "Refusing to package: absolute build paths are embedded in $($leakedPaths.Name -join ', '). Check <PathMap> in BuildPlanner.csproj."
+    }
 
     New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
     $zipPath = Join-Path $OutputDir "BuildPlanner-$Version.zip"
