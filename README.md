@@ -5,7 +5,26 @@ queue the blocks you intend to build, then pull **exactly** the components you a
 container with one keypress — no stack-grabbing, no "took 10, needed 11, walk back".
 
 Implemented as a **plugin** (`-plugins:`), not a data mod, so it does not appear in the in-game mod
-list. It is always active once the launch option is set.
+list and is not installed through the Workshop. It is always active once the launch option is set.
+
+## Install
+
+1. Download the latest `BuildPlanner-<version>.zip` from
+   [Releases](https://github.com/viligante8/SpaceEngineers2BuildPlanner/releases).
+2. Extract the whole folder somewhere permanent — **not** inside the game directory, or a game
+   update will delete it. Keep the files together; `BuildPlanner.dll` needs the MonoMod and
+   Mono.Cecil DLLs beside it.
+3. Steam → Space Engineers 2 → Properties → General → Launch Options:
+
+   ```
+   -plugins:C:\SE2Mods\BuildPlanner\BuildPlanner.dll
+   ```
+
+   Quote the whole option if the path contains spaces.
+4. Start the game and check the log for `BuildPlanner ready.`
+
+To uninstall, remove the launch option and delete the folder. Full instructions ship in the zip as
+`INSTALL.txt`.
 
 ## Status
 
@@ -19,7 +38,7 @@ requires 30 x Steel Plate
 notify: Build Planner: withdrew 30x Steel Plate
 ```
 
-Getting there took three wrong turns, all recorded in `../notes/build-planner-api.md`. The one worth
+Getting there took three wrong turns, all recorded in `notes/build-planner-api.md`. The one worth
 knowing: the queue summed `CubeBlockRecipeDefinition.CriticalItems`, which the XML docs define as
 *proportions* used "to generate the final recipe based on mass, efficiency and rounding" — not a
 component count. A 2.5m armour cube therefore asked for 1 Steel Plate instead of 30, and since the
@@ -41,7 +60,7 @@ Testing produce also exposed a reach bug that had been present in the withdrawal
 Steam → Space Engineers 2 → Properties → Launch Options:
 
 ```
--plugins:C:\Users\vilig\RiderProjects\se2\mod1\BuildPlanner\bin\BuildPlanner.dll
+-plugins:C:\SE2Mods\BuildPlanner\BuildPlanner.dll
 ```
 
 `-loadScripts` is **not** needed (that flag is for in-game scripting).
@@ -233,7 +252,7 @@ All four are detoured and **replaced** — the originals never run:
 `BuildPlannerIconControl` wraps each icon in a single `Button` whose `OnButtonPressed` dispatches on
 which mouse button was used — left to `ProduceCommand`, right to `RemoveCommand`. That matches SE1,
 where the wiki's build-planner page says "right-click a block inside the Build Planner removes it
-from the queue" (`../notes/build-planner-ux-spec.md`). It is simply undiscoverable: nothing on screen
+from the queue" (`notes/build-planner-ux-spec.md`). It is simply undiscoverable: nothing on screen
 says so.
 
 That means one queue, not two: everything mutates `BuildPlannerQueue`, and `EngineQueueMirror`
@@ -259,10 +278,10 @@ enqueue twice and still lose the queue.
   "no assembler or refinery connected" while standing at a working assembler, because the terminal
   view model is `Game2.Client` and its entity is the **client** copy, while `ItemConverterComponent`
   and `InventoryComponent` are `Game2.Simulation` and exist only on the **server** copy — the trap
-  `../notes/client-server-split.md` exists to warn about. Observed in game 2026-08-22 and reverted.
+  `notes/client-server-split.md` exists to warn about. Observed in game 2026-08-22 and reverted.
 
 Full derivation, including the two timing traps (logical vs visual tree, and when `DataContext`
-arrives) in `../notes/build-planner-api.md`, "The terminal's build planner panel is complete but
+arrives) in `notes/build-planner-api.md`, "The terminal's build planner panel is complete but
 switched off".
 
 ## Rebinding
@@ -309,7 +328,7 @@ behaviour are removed from the options file on the next launch.
 
 ### Middle-click is available after all
 
-Modelled on the SE1 scheme in `../notes/build-planner-ux-spec.md`. The defaults use `N` because
+Modelled on the SE1 scheme in `notes/build-planner-ux-spec.md`. The defaults use `N` because
 vanilla binds plain `Mouse::Middle` to three actions — `ba689cc1` (ToolTertiary), `6a759ebb` and
 `9ad853aa` — and an input is consumed by exactly one context per frame.
 
@@ -425,11 +444,9 @@ right-click so it is never claimed while a terminal or inventory screen is open.
 
 ## Not working yet
 
-1. **Produce ×10 and the moved SHIFT+ALT clear-queue chord have not been separately exercised.** Both
-   share their code paths with actions that have been verified, so this is a gap in testing rather
-   than a known defect.
-2. **Multiplayer is unverified.** Transfers run against the server session in-process; untested
-   against a real server.
+**Produce ×10 and the moved SHIFT+ALT clear-queue chord have not been separately exercised.** Both
+share their code paths with actions that have been verified, so this is a gap in testing rather than
+a known defect.
 
 ## Logging
 
@@ -492,6 +509,8 @@ instance — must be copied to the output folder.
 |---|---|
 | `BuildPlannerPlugin.cs` | `IPlugin` entry point |
 | `BuildPlannerInstaller.cs` | MonoMod hooks; vanilla GUIDs |
+| `BuildPlannerActions.cs` | The nine input actions and their default bindings |
+| `PlannerAction.cs` | What the Build Planner can be asked to do, one per action |
 | `BuildPlannerBinding.cs` | Input context, action registration, session resolution |
 | `BuildPlannerController.cs` | Dispatches input to queue / withdraw / deposit |
 | `BuildPlannerQueue.cs` | Planned blocks → merged component totals |
@@ -500,14 +519,16 @@ instance — must be copied to the output folder.
 | `InventoryShortfall.cs` | Engine-computed "what am I short of", shared by both |
 | `InventorySources.cs` | Aimed container → conveyor-reachable inventories |
 | `IntegrityToolAccess.cs` | The welder's current target — what to queue |
+| `BlockRequirements.cs` | What a part-built block *still* needs, not its full recipe |
+| `BlockMenuAccess.cs` | Queueing by right-clicking a build-menu (G) tile |
 | `EngineQueueMirror.cs` | Mirrors the queue into the engine's `BuildPlannerData` |
 | `TerminalPlannerPanel.cs` | Reveals Keen's hidden terminal panel and feeds it that data |
 | `PlayerAccess.cs` | Character and inventory lookup (both sessions) + diagnostics |
-| `Modifiers.cs` | Live CTRL/ALT/SHIFT state → action |
 | `Notifier.cs` | Outcome messages |
+| `Diagnostics.cs` | The state dump behind the diagnose keybind |
 | `Log.cs` | File logging; verbose by default, silenced by the `quiet` flag file |
 
-Tests live in `../BuildPlanner.Tests`.
+Tests live in `BuildPlanner.Tests`.
 
 ## Building
 
@@ -531,15 +552,23 @@ just build the zip locally.
 Works with the game open — it builds through a temporary directory rather than `bin\`.
 
 There is no CI: the plugin compiles against Keen's shipped assemblies, which are not in this repo,
-so no GitHub-hosted runner can build it. `../RELEASING.md` covers that and what the artifact does
+so no GitHub-hosted runner can build it. `RELEASING.md` covers that and what the artifact does
 and does not contain.
 
 ## Background
 
-- `../notes/client-server-split.md` — the two-session architecture. **Read this first.**
-- `../notes/build-planner-api.md` — verified engine API surface
-- `../notes/build-planner-ux-spec.md` — the SE1 behaviour being reproduced
-- `../CLAUDE.md` — project rules, including hard-won plugin and debugging lessons
+- `notes/client-server-split.md` — the two-session architecture. **Read this first.**
+- `notes/build-planner-api.md` — verified engine API surface
+- `notes/build-planner-ux-spec.md` — the SE1 behaviour being reproduced
+- `CLAUDE.md` — project rules, including hard-won plugin and debugging lessons
 
 Being a plugin bound to method signatures, an SE2 update can break it. If it stops loading after a
 patch, read the log first.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Bundled MonoMod, Mono.Cecil and iced are MIT too; their notices ship in the release zip as
+`THIRD-PARTY-NOTICES.txt`. **No Space Engineers 2 assemblies are redistributed** — the plugin
+compiles against your own installed copy of the game.
