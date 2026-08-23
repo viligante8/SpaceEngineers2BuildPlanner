@@ -567,8 +567,16 @@ internal sealed class BuildPlannerController
 
                 try
                 {
-                    if (source.TransferByDef(destination, itemDef, null, null, true) > 0)
+                    var amount = source.TransferByDef(destination, itemDef, null, null, true);
+                    if (amount > 0)
+                    {
+                        // Per-container, matching the withdrawal's own tracing. Without this the
+                        // spill from a full container into the next one leaves no evidence: the
+                        // only other output is the final item-type count, which is identical
+                        // whether one container took everything or four shared it.
+                        Log.Debug($"  debug: deposited {(int)amount} x {itemDef.DisplayName}");
                         movedThisItem = true;
+                    }
                 }
                 catch (Exception ex)
                 {
