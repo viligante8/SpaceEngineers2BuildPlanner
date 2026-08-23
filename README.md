@@ -97,12 +97,14 @@ Plates at an assembler with no iron and the game raises the ingot and ore jobs i
 Producing never clears your queue. The parts don't exist yet, so you still need to come back and
 withdraw them.
 
-**Seeing the queue.** Open any terminal and there's a Build Planner box in the bottom right listing
-what you've queued. Left-click a block to produce just that one, right-click to drop it from the
-queue.
+**Seeing the queue.** Open any terminal and there's a Build Planner box on the right listing what
+you've queued. **Produce** makes everything on it, **Clear** empties it, and each block has its own
+buttons — left-click to produce just that one, right-click to drop it.
 
-Fun detail: that panel is Keen's. They built the whole thing and shipped it switched off. This mod
-just turns it on and feeds it.
+<img src="docs/images/build_planner_ui.jpg" alt="The Build Planner panel in a terminal" width="420">
+
+Fun detail: that panel is Keen's. They built the whole thing — icons, buttons, layout — and shipped
+it switched off, wired to a field nothing ever assigns. This mod turns it on and feeds it.
 
 ## A word of caution
 
