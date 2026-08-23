@@ -54,8 +54,19 @@ Releasing is not the slow part of this project. Loading the game and testing is.
 
 ## What ships
 
-The zip holds the plugin, its MonoMod and Mono.Cecil dependencies, the PDB (so a user's stack trace
-is readable), `INSTALL.txt`, and `THIRD-PARTY-NOTICES.txt`.
+The zip holds the plugin, its MonoMod and Mono.Cecil dependencies, `INSTALL.txt`, and
+`THIRD-PARTY-NOTICES.txt`.
+
+**No debug symbols.** A `.pdb` embeds the absolute source paths of the machine that built it, plus
+a SourceLink document map - so shipping one published the developer's Windows user name to
+everyone who downloaded the release. The symbols were no use to a player anyway, since they cannot
+rebuild the project without Keen's assemblies. Anyone who needs a mapped stack trace can build the
+same tagged commit and get a matching pdb locally.
+
+The DLL itself is built with `<PathMap>` and `<Deterministic>`, so no absolute path survives in it
+either. After publishing, the script scans every file in the output for the current user name and
+for `C:\Users\` and refuses to package if either appears - the guard exists so this cannot quietly
+come back.
 
 **No game assemblies.** Every game reference in the csproj is `<Private>false</Private>`, so they are
 compile-time only. The script checks the published output for anything named `Game2.*`, `VRage.*` or
@@ -82,4 +93,4 @@ A local build with no `-Version` reports `0.0.0-dev`.
 The unit tests are pure logic and the script runs them, but they cannot see the failures that
 actually matter here — every serious bug in this project was a fact about the live engine, and all
 of them would have passed a green suite. Load the plugin and work through the test steps in
-`NEXT-SESSION.md` first, especially after a game update.
+`notes/in-game-tests.md` first, especially after a game update.

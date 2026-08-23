@@ -36,6 +36,10 @@
 .PARAMETER SkipTests
     Skip the unit tests. Do not use this for a release.
 
+.NOTES
+    The published output contains no debug symbols and no absolute build paths. Both are checked
+    after publishing and the script refuses to package if either reappears.
+
 .PARAMETER Publish
     After packaging, create the GitHub release and attach the zip, using the gh CLI.
     Creates a draft unless -Final is also passed, so there is always a chance to look first.
@@ -136,6 +140,28 @@ try {
 
     if (-not (Test-Path (Join-Path $publishDir "BuildPlanner.dll"))) {
         throw "Refusing to package: BuildPlanner.dll is missing from the publish output."
+    }
+
+    # Debug symbols are NOT shipped.
+    #
+    # A .pdb embeds the machine's absolute source paths and a SourceLink document map, so shipping
+    # one publishes the developer's Windows user name to every downloader. The symbols are of no use
+    # to a player either - they cannot rebuild the project without Keen's assemblies. Anyone who
+    # needs a mapped stack trace can build the same tagged commit and get a matching pdb locally.
+    Get-ChildItem $publishDir -Filter *.pdb | Remove-Item -Force
+
+    # Guard against the leak coming back by any other route. Checked on the real bytes rather than
+    # trusting the csproj, because this is the property that actually matters to a stranger.
+    $userName = $env:USERNAME
+    if ($userName) {
+        $leakedPaths = Get-ChildItem $publishDir -File | Where-Object {
+            $bytes = [IO.File]::ReadAllBytes($_.FullName)
+            $text = [Text.Encoding]::ASCII.GetString($bytes)
+            $text.Contains($userName) -or $text.Contains('C:\Users\')
+        }
+        if ($leakedPaths) {
+            throw "Refusing to package: absolute build paths are embedded in $($leakedPaths.Name -join ', '). Check <PathMap> in BuildPlanner.csproj."
+        }
     }
 
     Copy-Item (Join-Path $PSScriptRoot "INSTALL.txt") -Destination $publishDir

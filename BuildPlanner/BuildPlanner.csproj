@@ -12,6 +12,18 @@
     <AssemblyName>BuildPlanner</AssemblyName>
     <RootNamespace>BuildPlanner</RootNamespace>
 
+    <!--
+      Keep the developer's absolute paths out of the shipped binary.
+
+      Without this the compiler stamps the full build path into the assembly (the debug directory
+      entry pointing at obj\Release\BuildPlanner.pdb) and into the SourceLink document map, so a
+      released DLL published the machine's user name to everyone who downloaded it. PathMap rewrites
+      those to project-relative paths; Deterministic makes the output independent of where it was
+      built, which is what makes the rewrite complete rather than partial.
+    -->
+    <PathMap>$(MSBuildProjectDirectory)=BuildPlanner</PathMap>
+    <Deterministic>true</Deterministic>
+
     <!-- Override with: dotnet build -p:GameDir=... -->
     <GameDir Condition="'$(GameDir)' == ''">F:\SteamLibrary\steamapps\common\SpaceEngineers2\Game2</GameDir>
   </PropertyGroup>
