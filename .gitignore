@@ -34,3 +34,8 @@ msbuild.wrn
 .vs/
 # Release artifacts
 dist/
+
+# Screenshot originals. The optimised copies in docs/images/ are what the README uses - 1.3 MB
+# against 21 MB, and no visible difference at the width a README renders at. Keep the originals
+# locally if you want to re-crop; they do not belong in every clone forever.
+/*.png

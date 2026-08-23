@@ -9,6 +9,11 @@ SE2.
 This is a **plugin**, not a data mod. You install it with a launch option, and it won't show up in
 the in-game mod list.
 
+![Queueing a block with the welder out](docs/images/queueing_items.jpg)
+
+*Right-click an unfinished block with a welder out and it goes on the queue, with only what it still
+needs — this conveyor is 36% built, so it wants the remainder, not a fresh recipe.*
+
 ## Install
 
 1. Grab the latest zip from [Releases](https://github.com/viligante8/SpaceEngineers2BuildPlanner/releases).
@@ -55,6 +60,8 @@ To uninstall: delete the launch option and the folder.
 Everything except the build-menu right-click is rebindable in **Options → Controls → Building**,
 listed as "Build Planner: ...". Rebinding survives restarts.
 
+![The nine actions in Options, Controls, Building](docs/images/controls.jpg)
+
 The build-menu one isn't in that list. It's hooked onto the menu's own buttons rather than the input
 system, so right-click still clears a toolbar slot the way it always did.
 
@@ -71,6 +78,17 @@ Area welders queue everything they're covering in one go.
 assembler, a conveyor tube, a survival kit, whatever's in front of you. You get the difference
 between what you need and what you're already carrying, pulled from everywhere on that network. If
 there isn't enough, you get what there is and the queue stays put so you can come back.
+
+![A withdrawal reporting what it could not find](docs/images/missing_items_to_pull.jpg)
+
+*When the network can't cover it you still get what it had, and it tells you what's outstanding —
+here, four Steel Tube short.*
+
+**Depositing.** `ALT+N` pushes what you're carrying back into the network. It leaves your tools
+alone — only ore, materials and components go. If the nearest container fills up it keeps going into
+the next one, and tells you if it ran out of room before you ran out of items.
+
+![Depositing into a connected block](docs/images/deposit_items.jpg)
 
 **Producing.** `SHIFT+N` while looking at an assembler, or anything conveyor-connected to one,
 queues up the components you're short of. You don't need to queue the sub-parts. Ask for Steel
